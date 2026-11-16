@@ -1,0 +1,15 @@
+# hivemem-dsh 的加载补丁：把「每步前置注入」插件插进 composition。
+#
+# 安装后这一项会自动生效（默认连本机 hub http://127.0.0.1:7660）。
+# 远程 hub、多用户令牌、固定项目名等，按 id 覆盖 config 即可：
+#
+# - id: hivemem-brief
+#   config:
+#     baseUrl: https://hivemem.zpzp.xyz
+#     token: <你的 MCP 令牌>
+#     project: HiveMem-MCP      # 省略/auto = 用工作目录名
+#     ttlMs: 60000
+#     maxChars: 2600
+- insert:
+    - id: hivemem-brief
+      name: hivemem-dsh

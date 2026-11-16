@@ -1,0 +1,106 @@
+name: Publish plugin
+
+# Pushing a tag is the only way a plugin release appears. The tag is the
+# version of both the repository and dsh-plugin/, and the release carries the
+# tarball plus the channel.json the upgrade docs point at.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to publish (for example v0.4.4)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Check the tag matches the manifests
+        run: |
+          node -e '
+            const root = require("./package.json").version;
+            const plugin = require("./dsh-plugin/package.json").version;
+            const tag = process.env.TAG.replace(/^v/, "");
+            for (const [file, version] of [["package.json", root], ["dsh-plugin/package.json", plugin]]) {
+              if (version !== tag) {
+                console.error(`${file} is ${version} but the tag says ${tag}`);
+                process.exit(1);
+              }
+            }
+            console.log(`publishing ${tag}`);
+          '
+
+      - name: Install
+        run: npm ci
+
+      - name: Check
+        run: npm run check
+
+      - name: Pack the plugin and build the channel
+        id: pack
+        run: |
+          cd dsh-plugin
+          npm pack --json > ../pack.json
+          TARBALL=$(node -e "console.log(require('../pack.json')[0].filename)")
+          cd ..
+          cp "dsh-plugin/$TARBALL" hivemem-dsh.tgz
+          VERSION=$(node -p 'require("./dsh-plugin/package.json").version')
+          cp hivemem-dsh.tgz "hivemem-dsh-$VERSION.tgz"
+          node -e '
+            const { createHash } = require("node:crypto");
+            const { readFileSync, writeFileSync, statSync } = require("node:fs");
+            const root = require("./package.json");
+            const pkg = require("./dsh-plugin/package.json");
+            const version = pkg.version;
+            const stable = "hivemem-dsh.tgz";
+            const bytes = readFileSync(stable);
+            const channel = {
+              name: pkg.name,
+              channel: "stable",
+              latest: version,
+              versions: {
+                [version]: {
+                  url: `https://github.com/${process.env.GITHUB_REPOSITORY}/releases/download/v${version}/${stable}`,
+                  sha256: createHash("sha256").update(bytes).digest("hex"),
+                  size: statSync(stable).size,
+                  engines: pkg.engines ?? {},
+                  publishedAt: new Date().toISOString(),
+                  notes: pkg.description
+                }
+              },
+              homepage: root.homepage,
+              updatedAt: new Date().toISOString()
+            };
+            writeFileSync("channel.json", `${JSON.stringify(channel, null, 2)}\n`);
+          '
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Create the release if it is missing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$TAG" > /dev/null 2>&1 || \
+            gh release create "$TAG" --verify-tag --generate-notes --title "$TAG"
+
+      - name: Upload the assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p 'require("./dsh-plugin/package.json").version')
+          gh release upload "$TAG" hivemem-dsh.tgz "hivemem-dsh-$VERSION.tgz" channel.json --clobber

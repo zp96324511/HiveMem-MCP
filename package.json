@@ -1,0 +1,55 @@
+{
+  "name": "hivemem-mcp",
+  "version": "0.4.4",
+  "description": "Project-scoped shared memory hub for AI agents: MCP server (stdio + HTTP) with a built-in web management platform. Zero native dependencies.",
+  "type": "module",
+  "license": "MIT",
+  "homepage": "https://github.com/zp96324511/HiveMem-MCP#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zp96324511/HiveMem-MCP.git"
+  },
+  "bugs": {
+    "url": "https://github.com/zp96324511/HiveMem-MCP/issues"
+  },
+  "bin": {
+    "hivemem": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "web",
+    "dsh-plugin",
+    "README.md",
+    "DESIGN.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "keywords": [
+    "mcp",
+    "memory",
+    "agent",
+    "ai",
+    "sqlite",
+    "knowledge"
+  ],
+  "scripts": {
+    "build": "tsc && node scripts/copy-web.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "check:plugin": "node --test dsh-plugin/test/*.test.mjs",
+    "check": "npm run typecheck && npm test && npm run check:plugin",
+    "dev:stdio": "tsx src/index.ts serve",
+    "dev:hub": "tsx src/index.ts hub"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.7.0"
+  }
+}

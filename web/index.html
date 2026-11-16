@@ -1,0 +1,2040 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HiveMem · 记忆中枢</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%90%9D%3C/text%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #0b0d12; --panel: #12151d; --panel2: #171b26; --panel3: #1f2532;
+    --border: #262c3a; --border2: #35405a;
+    --text: #e7eaf2; --dim: #8b93a7; --faint: #5b6377;
+    --accent: #f5c542; --blue: #6ea8fe; --teal: #4fd1c5; --purple: #c084fc;
+    --green: #57ab5a; --red: #e5534b; --orange: #e09f3f;
+    --sc-user: #f5c542; --sc-project: #8fc1ff; --sc-device: #4fd1c5; --sc-agent: #c084fc;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  /* v0.2.3 lesson: author display rules must not defeat the hidden attribute. */
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    font: 14px/1.65 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    background: var(--bg); color: var(--text); overflow: hidden;
+  }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--panel3); border-radius: 5px; border: 2px solid var(--bg); }
+  ::-webkit-scrollbar-track { background: transparent; }
+  button {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 13px; cursor: pointer; font-size: 13px; font-family: inherit;
+  }
+  button:hover { border-color: var(--border2); }
+  button.primary { background: var(--accent); color: #171307; border: none; font-weight: 600; }
+  button.primary:hover { filter: brightness(1.08); }
+  button.danger-text { color: var(--red); }
+  button.ghost { background: none; border-color: transparent; color: var(--dim); }
+  button.ghost:hover { color: var(--text); }
+  input, select, textarea {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 10px; font-size: 13px; font-family: inherit;
+  }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--blue); }
+  a { color: var(--blue); }
+
+  #app { display: flex; height: 100vh; }
+
+  /* ---------- sidebar ---------- */
+  aside#sidebar {
+    width: 274px; min-width: 274px; background: var(--panel); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .brand { padding: 16px 16px 6px; font-size: 18px; font-weight: 700; color: var(--accent); }
+  .brand small { display: block; font-size: 11px; font-weight: 400; color: var(--faint); letter-spacing: .5px; }
+  #user-box { padding: 4px 16px 12px; font-size: 12px; color: var(--dim); border-bottom: 1px solid var(--border); }
+  #user-box .out { color: var(--faint); cursor: pointer; }
+  #user-box .out:hover { color: var(--text); }
+  #snav { flex: 1; overflow-y: auto; padding: 10px 10px 14px; }
+  .nav-label {
+    font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: 1px;
+    padding: 12px 8px 4px;
+  }
+  .tnode {
+    display: flex; align-items: center; gap: 7px; padding: 5px 9px; border-radius: 7px;
+    cursor: pointer; color: var(--dim); font-size: 13px; user-select: none; position: relative;
+  }
+  .tnode:hover { background: var(--panel2); color: var(--text); }
+  .tnode.active { background: var(--panel3); color: var(--text); }
+  .tnode.active::before {
+    content: ''; position: absolute; left: -1px; top: 6px; bottom: 6px; width: 3px;
+    border-radius: 3px; background: var(--accent);
+  }
+  .tnode .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tnode .chev {
+    width: 16px; text-align: center; color: var(--faint); font-size: 10px; flex: none;
+    transition: transform .15s;
+  }
+  .tnode .chev.open { transform: rotate(90deg); }
+  .cnt {
+    font-size: 10.5px; background: var(--panel3); border-radius: 9px; padding: 0 7px;
+    color: var(--faint); flex: none; line-height: 17px;
+  }
+  .cnt.warn { background: #4a2c14; color: var(--orange); }
+  .kids { margin-left: 15px; border-left: 1px solid var(--border); padding-left: 4px; }
+  .ro-badge {
+    font-size: 10px; color: var(--faint); background: var(--panel3); border-radius: 8px;
+    padding: 0 6px; flex: none; line-height: 16px;
+  }
+  /* Project delete affordance: always visible (works on touch, no hover),
+     faint until pointed at so the tree stays calm. */
+  .tnode .p-del {
+    flex: none; font-size: 11px; line-height: 15px; padding: 0 3px; border-radius: 5px;
+    color: var(--faint); opacity: .5; transition: color .12s, background .12s, opacity .12s;
+  }
+  .tnode .p-del:hover { color: var(--red); background: rgba(229,83,75,.14); opacity: 1; }
+  .sidebar-foot { padding: 10px; border-top: 1px solid var(--border); }
+  .sidebar-foot button { width: 100%; }
+
+  /* ---------- main ---------- */
+  main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+  #topbar {
+    display: flex; gap: 9px; padding: 12px 18px; border-bottom: 1px solid var(--border);
+    background: var(--panel); align-items: center; flex-wrap: wrap;
+  }
+  #search { flex: 1; min-width: 180px; }
+  #topbar select { max-width: 130px; }
+  #burger { display: none; }
+
+  /* ---------- layer strip ---------- */
+  #layer-strip { border-bottom: 1px solid var(--border); background: var(--panel); }
+  .strip-row { display: flex; align-items: center; gap: 8px; padding: 9px 18px 4px; flex-wrap: wrap; }
+  .seg {
+    display: inline-flex; align-items: center; gap: 6px; padding: 3px 11px; border-radius: 999px;
+    border: 1px solid var(--border); font-size: 12px; color: var(--faint); cursor: pointer;
+    background: var(--panel2); max-width: 240px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  }
+  .seg:hover { border-color: var(--border2); color: var(--dim); }
+  .seg.on-user { border-color: var(--sc-user); color: var(--sc-user); background: rgba(245,197,66,.07); }
+  .seg.on-project { border-color: var(--sc-project); color: var(--sc-project); background: rgba(143,193,255,.07); }
+  .seg.on-device { border-color: var(--sc-device); color: var(--sc-device); background: rgba(79,209,197,.07); }
+  .seg.on-agent { border-color: var(--sc-agent); color: var(--sc-agent); background: rgba(192,132,252,.07); }
+  .seg-arrow { color: var(--faint); font-size: 11px; }
+  .strip-exp { padding: 0 18px 9px; font-size: 12px; color: var(--dim); }
+  .strip-exp b { color: var(--text); font-weight: 600; }
+  .strip-actions { margin-left: auto; display: flex; gap: 8px; }
+
+  /* ---------- content ---------- */
+  #content { flex: 1; overflow-y: auto; padding: 16px 18px 60px; }
+  .view-title { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+  .view-sub { color: var(--dim); font-size: 12.5px; margin-bottom: 16px; }
+
+  /* layer cards (overview) */
+  .layer-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .layer-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px 16px; cursor: pointer; transition: border-color .15s;
+  }
+  .layer-card:hover { border-color: var(--border2); background: var(--panel2); }
+  .layer-card .ic { font-size: 18px; }
+  .layer-card .v { font-size: 26px; font-weight: 700; margin: 2px 0; }
+  .layer-card .k { font-size: 13px; font-weight: 600; }
+  .layer-card .d { font-size: 11.5px; color: var(--faint); line-height: 1.5; margin-top: 3px; }
+  .lc-user .v, .lc-user .k { color: var(--sc-user); }
+  .lc-project .v, .lc-project .k { color: var(--sc-project); }
+  .lc-device .v, .lc-device .k { color: var(--sc-device); }
+  .lc-agent .v, .lc-agent .k { color: var(--sc-agent); }
+
+  .banner {
+    display: flex; align-items: center; gap: 10px; background: rgba(224,159,63,.08);
+    border: 1px solid rgba(224,159,63,.35); color: var(--orange); border-radius: var(--radius);
+    padding: 10px 14px; margin-bottom: 20px; font-size: 13px; cursor: pointer;
+  }
+  .banner:hover { filter: brightness(1.15); }
+  .banner a { color: var(--orange); font-weight: 600; }
+
+  .proj-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+  .proj-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 13px 15px; cursor: pointer;
+  }
+  .proj-card:hover { border-color: var(--border2); background: var(--panel2); }
+  .proj-card .name { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 7px; }
+  .proj-card .meta { font-size: 11.5px; color: var(--faint); margin: 4px 0 8px; }
+  .mini-dist { display: flex; height: 5px; border-radius: 3px; overflow: hidden; background: var(--panel3); }
+  .mini-dist i { display: block; height: 100%; }
+  .dist-legend { display: flex; gap: 12px; font-size: 11px; color: var(--faint); margin-top: 6px; flex-wrap: wrap; }
+  .dist-legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: baseline; }
+
+  /* memory groups */
+  .mgroup { margin-bottom: 22px; }
+  .mgroup-head {
+    display: flex; align-items: baseline; gap: 9px; padding: 2px 2px 9px;
+    border-bottom: 1px solid var(--border); margin-bottom: 10px;
+  }
+  .mgroup-head .gi { font-size: 15px; }
+  .mgroup-head .gt { font-size: 13.5px; font-weight: 700; }
+  .mgroup-head .gs { font-size: 11.5px; color: var(--faint); }
+  .mgroup-head .gn { margin-left: auto; font-size: 11.5px; color: var(--faint); }
+  .t-user .gt, .t-user .gi { color: var(--sc-user); }
+  .t-project .gt, .t-project .gi { color: var(--sc-project); }
+  .t-device .gt, .t-device .gi { color: var(--sc-device); }
+  .t-agent .gt, .t-agent .gi { color: var(--sc-agent); }
+
+  .mem-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 11px 14px 11px 16px; margin-bottom: 8px; cursor: pointer; position: relative;
+  }
+  .mem-card:hover { border-color: var(--border2); background: var(--panel2); }
+  .mem-card::before {
+    content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px;
+    border-radius: 3px; background: var(--border2);
+  }
+  .mem-card.c-user::before { background: var(--sc-user); }
+  .mem-card.c-project::before { background: var(--sc-project); }
+  .mem-card.c-device::before { background: var(--sc-device); }
+  .mem-card.c-agent::before { background: var(--sc-agent); }
+  .mc-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .mc-title { font-weight: 600; font-size: 13.5px; }
+  .mc-snip { color: var(--dim); font-size: 12.5px; margin-top: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .mc-meta { display: flex; align-items: center; gap: 10px; margin-top: 7px; flex-wrap: wrap; }
+  .pin { color: var(--accent); flex: none; }
+  .badge { display: inline-block; font-size: 11px; padding: 0 8px; border-radius: 10px; white-space: nowrap; line-height: 18px; flex: none; }
+  .k-decision { background: #3d2f5c; color: #c8a8ff; }
+  .k-fact { background: #1e3a5f; color: #8fc1ff; }
+  .k-preference { background: #5f3a1e; color: #ffc18f; }
+  .k-procedure { background: #1e5f4a; color: #8fffc9; }
+  .k-episodic { background: #4a4a4a; color: #cfcfcf; }
+  .k-snippet { background: #5f1e3a; color: #ff8fc1; }
+  .sc-chip { font-size: 11px; padding: 0 8px; border-radius: 10px; line-height: 18px; flex: none; }
+  .sc-chip.cu { background: rgba(245,197,66,.12); color: var(--sc-user); }
+  .sc-chip.cp { background: rgba(143,193,255,.10); color: var(--sc-project); }
+  .sc-chip.cd { background: rgba(79,209,197,.10); color: var(--sc-device); }
+  .sc-chip.ca { background: rgba(192,132,252,.10); color: var(--sc-agent); }
+  .st-active { color: var(--green); font-size: 11.5px; }
+  .st-archived { color: var(--faint); font-size: 11.5px; }
+  .st-superseded { color: var(--red); font-size: 11.5px; }
+  .rev-badge { font-size: 11px; color: var(--purple); flex: none; }
+  .review-flag { font-size: 11px; color: var(--orange); flex: none; }
+  .bar { height: 4px; width: 56px; background: var(--panel3); border-radius: 2px; overflow: hidden; flex: none; }
+  .bar > i { display: block; height: 100%; background: var(--blue); }
+  .tag { display: inline-block; font-size: 11px; background: var(--panel2); border: 1px solid var(--border); color: var(--dim); border-radius: 10px; padding: 0 8px; margin: 1px 3px 1px 0; line-height: 17px; }
+  .mc-date { color: var(--faint); font-size: 11.5px; margin-left: auto; flex: none; }
+
+  /* table layout */
+  table.list { width: 100%; border-collapse: collapse; }
+  .list th { text-align: left; font-size: 11.5px; color: var(--faint); font-weight: 500; padding: 7px 9px; border-bottom: 1px solid var(--border); }
+  .list td { padding: 8px 9px; border-bottom: 1px solid var(--border); vertical-align: top; font-size: 13px; }
+  .list tr.rowlink { cursor: pointer; }
+  .list tr.rowlink:hover { background: var(--panel); }
+  .list .t { font-weight: 600; }
+  .list .s { color: var(--dim); font-size: 12px; max-width: 420px; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+
+  .empty { color: var(--faint); text-align: center; padding: 56px 20px; font-size: 13px; line-height: 2; }
+  .loadmore { display: block; margin: 16px auto 0; }
+  .warn-banner {
+    background: rgba(224,159,63,.08); border: 1px solid rgba(224,159,63,.3); color: var(--orange);
+    border-radius: var(--radius); padding: 8px 13px; font-size: 12.5px; margin-bottom: 14px;
+  }
+
+  /* ---------- drawer ---------- */
+  #drawer {
+    position: fixed; top: 0; right: 0; bottom: 0; width: min(480px, 96vw);
+    background: var(--panel); border-left: 1px solid var(--border); z-index: 30;
+    transform: translateX(105%); transition: transform .18s ease; display: flex; flex-direction: column;
+    box-shadow: -18px 0 40px rgba(0,0,0,.35);
+  }
+  #drawer.open { transform: none; }
+  .dw-head { padding: 14px 18px 10px; border-bottom: 1px solid var(--border); }
+  .dw-toprow { display: flex; align-items: flex-start; gap: 10px; }
+  .dw-title { font-size: 15.5px; font-weight: 700; flex: 1; line-height: 1.45; }
+  .dw-badges { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 8px; }
+  .dw-body { flex: 1; overflow-y: auto; padding: 14px 18px 20px; }
+  .dw-sec { margin-bottom: 18px; }
+  .dw-sec h4 { font-size: 12px; color: var(--faint); text-transform: uppercase; letter-spacing: .8px; margin-bottom: 7px; }
+  .dw-content { font-size: 13.5px; line-height: 1.75; word-break: break-word; }
+  .dw-content h3, .dw-content h4, .dw-content h5 { margin: 12px 0 4px; }
+  .dw-content pre { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; overflow-x: auto; margin: 8px 0; font-size: 12.5px; }
+  .dw-content code { background: var(--panel3); border-radius: 4px; padding: 0 5px; font-size: 12.5px; }
+  .dw-content pre code { background: none; padding: 0; }
+  .dw-content li { margin-left: 18px; }
+  .meta-grid { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 12.5px; }
+  .meta-grid .mk { color: var(--faint); white-space: nowrap; }
+  .meta-grid .mv { color: var(--dim); word-break: break-all; }
+  .meta-grid .mv a { cursor: pointer; }
+  .chain { border-left: 2px solid var(--border); margin: 4px 0 4px 7px; padding-left: 14px; }
+  .chain-item { position: relative; padding: 5px 0; cursor: pointer; }
+  .chain-item::before {
+    content: ''; position: absolute; left: -19.5px; top: 12px; width: 9px; height: 9px;
+    border-radius: 50%; background: var(--faint); border: 2px solid var(--panel);
+  }
+  .chain-item.current::before { background: var(--accent); box-shadow: 0 0 0 3px rgba(245,197,66,.18); }
+  .chain-item .ci-t { font-size: 13px; font-weight: 600; }
+  .chain-item.current .ci-t { color: var(--accent); }
+  .chain-item .ci-d { font-size: 11.5px; color: var(--faint); }
+  /* evidence chain + version history (v0.4.0) */
+  .ver-badge { font-size: 11px; color: var(--dim); border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; flex: none; }
+  .ev-list { display: flex; flex-direction: column; gap: 6px; }
+  .ev-item { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; }
+  .ev-kind { font-size: 11px; color: var(--purple); border: 1px solid var(--border); border-radius: 5px; padding: 0 5px; flex: none; }
+  .ev-loc { color: var(--dim); word-break: break-all; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .ev-quote { color: var(--faint); font-size: 12px; margin: 2px 0 0 0; padding-left: 9px; border-left: 2px solid var(--border); white-space: pre-wrap; }
+  .ver-row { display: block; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px dashed var(--border); color: var(--dim); font: inherit; font-size: 12.5px; padding: 5px 0; cursor: pointer; }
+  .ver-row:hover { color: var(--accent); }
+  .ver-row.on { color: var(--accent); }
+  .ver-snap { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 8px 0 0; font-size: 12.5px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
+  .dw-foot { border-top: 1px solid var(--border); padding: 10px 18px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .dw-foot .spacer { flex: 1; }
+
+  /* ---------- modals ---------- */
+  .modal-bg {
+    position: fixed; inset: 0; background: rgba(4,6,10,.62); display: flex;
+    align-items: center; justify-content: center; z-index: 40; backdrop-filter: blur(2px);
+  }
+  .modal {
+    background: var(--panel); border: 1px solid var(--border2); border-radius: 14px;
+    width: min(720px, 94vw); max-height: 90vh; overflow-y: auto; padding: 20px 22px;
+    box-shadow: 0 24px 60px rgba(0,0,0,.5);
+  }
+  .modal h3 { margin-bottom: 14px; color: var(--accent); font-size: 15px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 12px; color: var(--dim); margin-bottom: 4px; }
+  .field input[type="text"], .field input[type="password"], .field input[type="number"],
+  .field textarea, .field select, .field input[list] {
+    width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: inherit;
+  }
+  .field textarea { min-height: 150px; resize: vertical; line-height: 1.6; }
+  .field .hint { font-size: 11.5px; color: var(--faint); margin-top: 3px; }
+  .field-note {
+    font-size: 12px; line-height: 1.6; color: var(--dim); background: var(--panel2);
+    border: 1px solid var(--border); border-left: 3px solid var(--red); border-radius: 8px;
+    padding: 9px 11px; margin-bottom: 12px; word-break: break-word;
+  }
+  .field-chk label { display: flex; align-items: flex-start; gap: 7px; font-size: 12px; color: var(--dim); cursor: pointer; }
+  .field-chk input[type="checkbox"] { margin-top: 2px; accent-color: var(--red); }
+  .row2 { display: flex; gap: 12px; } .row2 > .field { flex: 1; }
+  .modal-actions { display: flex; gap: 10px; margin-top: 16px; justify-content: flex-end; align-items: center; }
+  .modal-actions .meta-line { font-size: 11.5px; color: var(--faint); margin-right: auto; word-break: break-all; }
+
+  /* scope picker */
+  .scope-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px; }
+  .scope-opt {
+    border: 1px solid var(--border); border-radius: 9px; padding: 9px 12px; cursor: pointer;
+    display: flex; gap: 9px; align-items: flex-start; background: var(--panel2);
+  }
+  .scope-opt:hover { border-color: var(--border2); }
+  .scope-opt input { margin-top: 3px; accent-color: var(--accent); }
+  .scope-opt .so-t { font-size: 13px; font-weight: 600; }
+  .scope-opt .so-d { font-size: 11px; color: var(--faint); line-height: 1.45; }
+  .scope-opt.sel { border-color: var(--accent); background: rgba(245,197,66,.06); }
+  .scope-opt.su .so-t { color: var(--sc-user); }
+  .scope-opt.sp .so-t { color: var(--sc-project); }
+  .scope-opt.sd .so-t { color: var(--sc-device); }
+  .scope-opt.sa .so-t { color: var(--sc-agent); }
+
+  /* brief modal */
+  .brief-meta { display: flex; gap: 14px; align-items: center; font-size: 12px; color: var(--dim); margin-bottom: 10px; flex-wrap: wrap; }
+  .budget-bar { flex: 1; min-width: 120px; height: 6px; background: var(--panel3); border-radius: 3px; overflow: hidden; }
+  .budget-bar i { display: block; height: 100%; background: var(--accent); }
+  .brief-render {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 9px;
+    padding: 14px 16px; font-size: 13px; line-height: 1.8; white-space: pre-wrap; word-break: break-word;
+    max-height: 55vh; overflow-y: auto;
+  }
+  .brief-render .bh { font-weight: 700; }
+  .brief-render .bh-user { color: var(--sc-user); }
+  .brief-render .bh-proj { color: var(--sc-project); }
+  .brief-render .bh-dev { color: var(--sc-device); }
+  .brief-render .bh-agent { color: var(--sc-agent); }
+  .brief-render .bid { color: var(--faint); font-size: 11px; }
+
+  /* login */
+  #login-overlay {
+    position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(1000px 600px at 20% -10%, #1a2030 0%, var(--bg) 60%);
+  }
+  .login-box {
+    background: var(--panel); border: 1px solid var(--border2); border-radius: 16px;
+    padding: 30px 30px 26px; width: min(380px, 92vw); box-shadow: 0 30px 80px rgba(0,0,0,.5);
+  }
+  .login-box .bee { font-size: 34px; }
+  .login-box h2 { font-size: 19px; margin: 8px 0 4px; color: var(--accent); }
+  .login-box p { color: var(--dim); font-size: 12.5px; margin-bottom: 18px; }
+  .login-box input { width: 100%; margin-bottom: 12px; }
+  .login-err { color: var(--red); font-size: 12px; min-height: 18px; margin-bottom: 4px; }
+
+  /* toast */
+  #toast {
+    position: fixed; bottom: 22px; right: 22px; z-index: 80; display: flex; flex-direction: column; gap: 8px;
+  }
+  .toast-item {
+    background: var(--panel3); border: 1px solid var(--border2); color: var(--text);
+    border-radius: 9px; padding: 10px 16px; font-size: 13px; box-shadow: 0 10px 30px rgba(0,0,0,.4);
+    animation: toast-in .18s ease; max-width: 380px;
+  }
+  .toast-item.err { border-color: var(--red); color: #ffb4af; }
+  .toast-item.ok { border-color: var(--green); }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+  .section-h { font-size: 14px; font-weight: 700; margin: 22px 0 10px; color: var(--accent); }
+  .section-h:first-child { margin-top: 0; }
+  .dist-big { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--panel3); margin: 8px 0 6px; }
+  .dist-big i { display: block; height: 100%; }
+  .stat-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin: 10px 0; }
+  .stat-card { background: var(--panel); border: 1px solid var(--border); border-radius: 9px; padding: 11px 13px; }
+  .stat-card .v { font-size: 21px; font-weight: 700; color: var(--accent); }
+  .stat-card .k { font-size: 11.5px; color: var(--dim); }
+  .act-badge { font-size: 11px; padding: 0 8px; border-radius: 10px; line-height: 18px; white-space: nowrap; }
+  .a-create { background: #14351c; color: #7ee787; }
+  .a-update, .a-move { background: #1e3a5f; color: #8fc1ff; }
+  .a-delete { background: #4a1a1a; color: #ff9d97; }
+  .a-supersede, .a-revise { background: #3d2f5c; color: #c8a8ff; }
+  .a-expire { background: #4a2c14; color: #ffc18f; }
+  .a-review { background: #1e5f4a; color: #8fffc9; }
+  .a-read, .a-bootstrap { background: #333; color: #aaa; }
+  .mem-link { cursor: pointer; color: var(--blue); font-size: 11.5px; }
+
+  @media (max-width: 900px) {
+    aside#sidebar {
+      position: fixed; left: 0; top: 0; bottom: 0; z-index: 50; transform: translateX(-105%);
+      transition: transform .18s ease; box-shadow: 20px 0 40px rgba(0,0,0,.4);
+    }
+    aside#sidebar.open { transform: none; }
+    #burger { display: inline-block; }
+    #drawer { width: 100vw; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="brand">🐝 HiveMem<small>记忆中枢 · 四层作用域</small></div>
+    <div id="user-box"></div>
+    <nav id="snav">
+      <div class="nav-label">导航</div>
+      <div class="tnode" id="nav-overview">🏠 <span class="label">总览</span></div>
+      <div class="tnode" id="nav-all">🌐 <span class="label">全部记忆</span><span class="cnt" id="cnt-all"></span></div>
+      <div class="tnode" id="nav-user">👤 <span class="label">用户级</span><span class="cnt" id="cnt-user"></span></div>
+      <div class="tnode" id="nav-review">⏰ <span class="label">待复审</span><span class="cnt" id="cnt-review"></span></div>
+      <div class="nav-label">项目层次</div>
+      <div id="proj-tree"></div>
+      <div class="nav-label">管理</div>
+      <div class="tnode" id="nav-stats">📊 <span class="label">统计</span></div>
+      <div class="tnode" id="nav-audit">🕘 <span class="label">审计日志</span></div>
+      <div class="tnode" id="nav-admin">⚙️ <span class="label">用户与授权</span></div>
+    </nav>
+    <div class="sidebar-foot"><button id="new-project">＋ 新建项目</button></div>
+  </aside>
+
+  <main>
+    <header id="topbar">
+      <button id="burger">☰</button>
+      <input id="search" type="search" placeholder="搜索记忆（标题 / 内容 / 标签）…">
+      <select id="kind-filter">
+        <option value="">全部类型</option>
+        <option value="decision">决策</option><option value="fact">事实</option>
+        <option value="preference">偏好</option><option value="procedure">流程</option>
+        <option value="episodic">过程</option><option value="snippet">片段</option>
+      </select>
+      <select id="status-filter">
+        <option value="active">active</option><option value="">全部状态</option>
+        <option value="archived">archived</option><option value="superseded">superseded</option>
+      </select>
+      <select id="layout-toggle">
+        <option value="layered">分层视图</option><option value="table">表格视图</option>
+      </select>
+      <button id="new-memory" class="primary">＋ 新记忆</button>
+    </header>
+    <div id="layer-strip" hidden></div>
+    <section id="content">
+      <div id="view-overview"></div>
+      <div id="view-memories" hidden></div>
+      <div id="view-review" hidden></div>
+      <div id="view-audit" hidden></div>
+      <div id="view-stats" hidden></div>
+      <div id="view-admin" hidden></div>
+    </section>
+  </main>
+
+  <aside id="drawer">
+    <div class="dw-head">
+      <div class="dw-toprow">
+        <div class="dw-title" id="dw-title"></div>
+        <button class="ghost" id="dw-close">✕</button>
+      </div>
+      <div class="dw-badges" id="dw-badges"></div>
+    </div>
+    <div class="dw-body" id="dw-body"></div>
+    <div class="dw-foot" id="dw-foot"></div>
+  </aside>
+</div>
+
+<div id="login-overlay" hidden>
+  <div class="login-box">
+    <div class="bee">🐝</div>
+    <h2>HiveMem 记忆中枢</h2>
+    <p id="login-sub">此 hub 已启用多用户模式，请登录。</p>
+    <div id="login-password-part">
+      <div class="field"><label>用户名</label><input type="text" id="login-name" autocomplete="username"></div>
+      <div class="field"><label>密码</label><input type="password" id="login-pass" autocomplete="current-password"></div>
+    </div>
+    <div id="login-token-part" hidden>
+      <div class="field"><label>访问令牌（Bearer Token）</label><input type="password" id="login-token" autocomplete="off"></div>
+    </div>
+    <div class="login-err" id="login-error"></div>
+    <button class="primary" id="login-submit" style="width:100%">登录</button>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-editor" hidden>
+  <div class="modal">
+    <h3 id="ed-title">新记忆</h3>
+    <div class="field">
+      <label>作用域（记忆层次）</label>
+      <div class="scope-grid" id="ed-scope-grid">
+        <div class="scope-opt su" data-scope="user"><input type="radio" name="scope" value="user"><div><div class="so-t">👤 用户级</div><div class="so-d">跨项目的身份、能力与偏好；加载进每个项目简报，最优先</div></div></div>
+        <div class="scope-opt sp" data-scope="project"><input type="radio" name="scope" value="project"><div><div class="so-t">🗂 项目级</div><div class="so-d">项目通用知识，所有设备、所有工具可见（默认）</div></div></div>
+        <div class="scope-opt sd" data-scope="device"><input type="radio" name="scope" value="device"><div><div class="so-t">💻 设备级</div><div class="so-d">仅指定设备上的会话可见（环境差异）</div></div></div>
+        <div class="scope-opt sa" data-scope="agent"><input type="radio" name="scope" value="agent"><div><div class="so-t">🔧 工具级</div><div class="so-d">仅指定设备 × 工具的会话可见（配置差异）</div></div></div>
+      </div>
+      <div class="row2" id="ed-tag-row" hidden>
+        <div class="field"><label>设备（device 标签）</label><input type="text" id="ed-device" list="dl-devices"><div class="hint">留空 = 不限设备（全设备通用）</div></div>
+        <div class="field" id="ed-agent-field"><label>工具（agent 标签）</label><input type="text" id="ed-agent" list="dl-agents"></div>
+      </div>
+    </div>
+    <div class="field" id="ed-project-field"><label>项目</label><select id="ed-project"></select></div>
+    <div class="field"><label>标题</label><input type="text" id="ed-title-input"></div>
+    <div class="field"><label>内容（markdown）</label><textarea id="ed-content"></textarea></div>
+    <div class="row2">
+      <div class="field"><label>类型</label>
+        <select id="ed-kind">
+          <option value="decision">决策 decision</option><option value="fact">事实 fact</option>
+          <option value="preference">偏好 preference</option><option value="procedure">流程 procedure</option>
+          <option value="episodic">过程 episodic</option><option value="snippet">片段 snippet</option>
+        </select>
+      </div>
+      <div class="field"><label>重要性（0~1）</label><input type="number" id="ed-importance" min="0" max="1" step="0.1" value="0.5"></div>
+      <div class="field"><label>状态</label>
+        <select id="ed-status"><option value="active">active</option><option value="archived">archived</option><option value="superseded">superseded</option></select>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>标签（逗号分隔）</label><input type="text" id="ed-tags"></div>
+      <div class="field"><label>主题键 topic_key</label><input type="text" id="ed-topic" placeholder="如 architecture/auth-model"><div class="hint">同 key 写入会原地修订（revision +1），不产生重复</div></div>
+      <div class="field"><label>TTL（天，留空永不过期）</label><input type="number" id="ed-ttl" min="0" max="3650" step="1" placeholder="∞"></div>
+    </div>
+    <div class="field">
+      <label><input type="checkbox" id="ed-pinned" style="vertical-align:-2px"> 置顶（进入项目简报）</label>
+    </div>
+    <div class="modal-actions">
+      <button class="danger-text" id="ed-delete" hidden>删除</button>
+      <span class="meta-line" id="ed-meta"></span>
+      <button id="ed-cancel">取消</button>
+      <button class="primary" id="ed-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-generic" hidden>
+  <div class="modal" style="width:min(460px,94vw)">
+    <h3 id="gm-title"></h3>
+    <div id="gm-fields"></div>
+    <div class="modal-actions">
+      <span class="meta-line" id="gm-meta"></span>
+      <button id="gm-cancel">取消</button>
+      <button class="primary" id="gm-save">确定</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-brief" hidden>
+  <div class="modal" style="width:min(760px,94vw)">
+    <h3 id="brief-title">简报预览</h3>
+    <div class="brief-meta">
+      <span id="brief-ctx"></span>
+      <div class="budget-bar"><i id="brief-budget-i"></i></div>
+      <span id="brief-budget-t"></span>
+      <span id="brief-trunc" style="color:var(--orange)"></span>
+    </div>
+    <div class="brief-render" id="brief-body"></div>
+    <div class="modal-actions">
+      <button id="brief-raw">查看原始文本</button>
+      <button class="primary" id="brief-close">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-tokens" hidden>
+  <div class="modal" style="width:min(640px,94vw)">
+    <h3 id="tokens-title">MCP 令牌</h3>
+    <div id="tokens-body"></div>
+    <div class="modal-actions">
+      <button id="tokens-new">＋ 生成新令牌</button>
+      <button class="primary" id="tokens-close">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-token-show" hidden>
+  <div class="modal" style="width:min(560px,94vw)">
+    <h3>MCP 访问令牌（只显示这一次）</h3>
+    <div class="field"><textarea id="token-text" readonly style="min-height:80px;font-family:monospace;font-size:12px"></textarea></div>
+    <div class="field"><div class="hint">配置到 agent 客户端（如 DSH patch）：headers 里加 "Authorization": "Bearer &lt;token&gt;"，多设备再加 "X-HiveMem-Device": "&lt;设备名&gt;"</div></div>
+    <div class="modal-actions">
+      <button id="token-copy">复制</button>
+      <button class="primary" id="token-close">关闭</button>
+    </div>
+  </div>
+</div>
+
+<datalist id="dl-devices"></datalist>
+<datalist id="dl-agents"></datalist>
+<div id="toast"></div>
+
+<script>
+'use strict';
+/* ============================================================
+   HiveMem web console — hierarchy-first redesign (v0.3.0)
+   Layers: user → project → device → agent (DESIGN.md §13).
+   ============================================================ */
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmtDate = (iso) => { try { return new Date(iso).toLocaleString('zh-CN', { hour12: false }); } catch { return iso; } };
+const fmtDay = (iso) => { try { return String(iso).slice(0, 10); } catch { return iso; } };
+
+const KIND_LABEL = { decision: '决策', fact: '事实', preference: '偏好', procedure: '流程', episodic: '过程', snippet: '片段' };
+const ACTION_LABEL = { create: '创建', update: '更新', delete: '删除', move: '移动', expire: '过期归档', supersede: '取代', revise: '修订', review: '复审', read: '读取', bootstrap: '简报' };
+const LAYER_META = {
+  user:    { icon: '👤', name: '用户级', color: 'var(--sc-user)',    expl: '跨项目的身份、能力与偏好 — 加载进每个项目的简报，最优先' },
+  project: { icon: '🗂', name: '项目级', color: 'var(--sc-project)', expl: '项目通用知识 — 该项目的所有设备、所有工具会话都可见' },
+  device:  { icon: '💻', name: '设备级', color: 'var(--sc-device)',  expl: '同项目在不同机器的环境差异 — 仅设备名匹配的会话可见' },
+  agent:   { icon: '🔧', name: '工具级', color: 'var(--sc-agent)',   expl: '同项目同设备在不同工具的配置差异 — 仅 (设备, 工具) 匹配的会话可见' },
+};
+
+const state = {
+  me: null, multiUser: false,
+  tree: null, devices: [],
+  view: 'overview',            // overview | memories | review | audit | stats | admin
+  node: { type: 'all' },       // all | layer | user | project | device | agent
+  query: '', kind: '', status: 'active', layout: 'layered',
+  hits: [], more: false, offset: 0, warnings: [],
+  expanded: {},                 // projectId -> bool
+  editing: null, editingPreset: null,
+  detail: null, chain: [],
+  reviewCount: 0,
+  auditProject: '',
+};
+let token = localStorage.getItem('hivemem_token') || '';
+
+/* ---------------- toast ---------------- */
+function toast(msg, kind) {
+  const el = document.createElement('div');
+  el.className = 'toast-item' + (kind === 'err' ? ' err' : kind === 'ok' ? ' ok' : '');
+  el.textContent = msg;
+  $('toast').appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 320); }, 3200);
+}
+
+/* ---------------- api ---------------- */
+async function api(path, init = {}, opts = {}) {
+  const headers = { ...(init.headers || {}), ...(opts.headers || {}) };
+  if (token) headers.Authorization = 'Bearer ' + token;
+  const res = await fetch(path, { ...init, headers });
+  if (res.status === 401) {
+    if (state.multiUser) { showLogin('password'); throw new Error('请先登录'); }
+    showLogin('token'); throw new Error('unauthorized');
+  }
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || res.statusText);
+  return body;
+}
+
+/* ---------------- auth ---------------- */
+async function initAuth() {
+  const me = await api('/api/auth/me');
+  state.me = me.user ?? null;
+  state.multiUser = Boolean(me.multiUser);
+  if (state.multiUser && !state.me) { showLogin('password'); return false; }
+  $('login-overlay').hidden = true;
+  renderUserBox();
+  return true;
+}
+
+function showLogin(mode) {
+  $('login-overlay').hidden = false;
+  $('login-error').textContent = '';
+  const pw = mode === 'password';
+  $('login-password-part').hidden = !pw;
+  $('login-token-part').hidden = pw;
+  $('login-sub').textContent = pw
+    ? '此 hub 已启用多用户模式，请输入账号密码。'
+    : '此 hub 已启用认证，请输入 Bearer 访问令牌。';
+  (pw ? $('login-name') : $('login-token')).focus();
+}
+
+async function doLogin() {
+  try {
+    if (!$('login-password-part').hidden) {
+      const name = $('login-name').value.trim();
+      const password = $('login-pass').value;
+      await api('/api/auth/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, password }),
+      });
+      $('login-pass').value = '';
+      if (!(await initAuth())) return;
+    } else {
+      token = $('login-token').value.trim();
+      localStorage.setItem('hivemem_token', token);
+      const me = await api('/api/auth/me');
+      state.me = me.user ?? null; state.multiUser = Boolean(me.multiUser);
+      $('login-overlay').hidden = true;
+      renderUserBox();
+    }
+    await loadAll();
+  } catch (e) {
+    $('login-error').textContent = '登录失败：' + e.message;
+  }
+}
+
+function renderUserBox() {
+  const box = $('user-box');
+  if (state.me) {
+    box.innerHTML = `👤 ${esc(state.me.name)} · ${state.me.role === 'admin' ? '管理员' : '用户'} · <span class="out" id="logout-link">退出</span>`;
+    $('logout-link').onclick = async () => {
+      try { await api('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
+      state.me = null;
+      showLogin('password');
+    };
+  } else {
+    box.textContent = '单用户模式 · 在「用户与授权」创建首个用户后启用多用户';
+  }
+  $('nav-admin').hidden = !(state.me?.role === 'admin' || !state.multiUser);
+}
+
+/* ---------------- data loading ---------------- */
+async function loadTree() {
+  state.tree = await api('/api/tree');
+  renderTree();
+  renderDatalists();
+}
+
+async function loadReviewCount() {
+  try {
+    const { overdue } = await api('/api/review');
+    state.reviewCount = overdue.length;
+  } catch { state.reviewCount = 0; }
+  const c = $('cnt-review');
+  c.textContent = state.reviewCount || '';
+  c.classList.toggle('warn', state.reviewCount > 0);
+}
+
+async function loadAll() {
+  await loadTree();
+  await loadReviewCount();
+  setView(state.view === 'overview' ? 'overview' : state.view, { keepNode: true });
+}
+
+function projectName(id) {
+  if (state.tree?.user && id === state.tree.user.id) return '@user';
+  return state.tree?.projects.find((p) => p.id === id)?.name ?? id;
+}
+
+/* ---------------- sidebar tree ---------------- */
+function nodeKey(node) {
+  switch (node.type) {
+    case 'all': return 'all';
+    case 'layer': return 'layer:' + node.scope + ':' + (node.project || '');
+    case 'user': return 'user';
+    case 'project': return 'project:' + node.project;
+    case 'device': return 'device:' + node.project + ':' + node.device;
+    case 'agent': return 'agent:' + node.project + ':' + node.device + ':' + node.agent;
+  }
+}
+
+function renderTree() {
+  const t = state.tree;
+  if (!t) return;
+  const allCount = (t.user?.count || 0) + t.projects.reduce((s, p) => s + p.active_count, 0);
+  $('cnt-all').textContent = allCount || '';
+  $('cnt-user').textContent = t.user?.count || '';
+
+  const wrap = $('proj-tree');
+  wrap.innerHTML = '';
+  for (const p of t.projects) {
+    const mine = !state.me || state.me.role === 'admin' || p.owner_user_id === state.me.id;
+    const kidsOpen = !!state.expanded[p.id];
+    const devCount = p.devices.reduce((s, d) => s + d.count + d.agents.reduce((x, a) => x + a.count, 0), 0);
+    const total = p.project.count + devCount;
+
+    const head = document.createElement('div');
+    head.className = 'tnode';
+    head.dataset.key = 'project:' + p.id;
+    head.innerHTML = `
+      <span class="chev ${kidsOpen ? 'open' : ''}">▶</span>
+      <span style="flex:none">🗂</span>
+      <span class="label" title="${esc(p.root_path || p.id)}">${esc(p.name)}</span>
+      ${mine ? '' : '<span class="ro-badge">只读</span>'}
+      ${mine ? '<span class="p-del" title="删除项目（连同其全部记忆）">✕</span>' : ''}
+      <span class="cnt">${total}</span>`;
+    const delBtn = head.querySelector('.p-del');
+    if (delBtn) delBtn.onclick = (e) => { e.stopPropagation(); openProjectDelete(p); };
+    head.querySelector('.chev').onclick = (e) => {
+      e.stopPropagation();
+      state.expanded[p.id] = !state.expanded[p.id];
+      renderTree();
+    };
+    head.onclick = () => { state.expanded[p.id] = true; setNode({ type: 'project', project: p.id }); };
+    wrap.appendChild(head);
+
+    if (!kidsOpen) continue;
+    const kids = document.createElement('div');
+    kids.className = 'kids';
+
+    const pRow = document.createElement('div');
+    pRow.className = 'tnode';
+    pRow.dataset.key = 'layer:project:' + p.id;
+    pRow.innerHTML = `<span style="flex:none">·</span><span class="label">项目级</span><span class="cnt">${p.project.count}</span>`;
+    pRow.onclick = () => setNode({ type: 'layer', scope: 'project', project: p.id });
+    kids.appendChild(pRow);
+
+    for (const d of p.devices) {
+      const dWrap = document.createElement('div');
+      const dName = d.name === null ? null : d.name;
+      const dRow = document.createElement('div');
+      dRow.className = 'tnode';
+      if (dName !== null) dRow.dataset.key = 'device:' + p.id + ':' + dName;
+      const agentSum = d.agents.reduce((s, a) => s + a.count, 0);
+      dRow.innerHTML = `
+        <span style="flex:none">💻</span>
+        <span class="label">${dName === null ? '全设备' : esc(dName)}</span>
+        <span class="cnt">${d.count + agentSum}</span>`;
+      if (dName !== null) dRow.onclick = () => setNode({ type: 'device', project: p.id, device: dName });
+      else dRow.style.cursor = 'default';
+      dWrap.appendChild(dRow);
+      if (d.agents.length) {
+        const aKids = document.createElement('div');
+        aKids.className = 'kids';
+        for (const a of d.agents) {
+          const aRow = document.createElement('div');
+          aRow.className = 'tnode';
+          aRow.dataset.key = 'agent:' + p.id + ':' + dName + ':' + a.name;
+          aRow.innerHTML = `<span style="flex:none">🔧</span><span class="label">${esc(a.name)}</span><span class="cnt">${a.count}</span>`;
+          aRow.onclick = () => setNode({ type: 'agent', project: p.id, device: dName, agent: a.name });
+          aKids.appendChild(aRow);
+        }
+        dWrap.appendChild(aKids);
+      }
+      kids.appendChild(dWrap);
+    }
+    wrap.appendChild(kids);
+  }
+  markActiveNav();
+}
+
+function markActiveNav() {
+  const key = state.view === 'memories' ? nodeKey(state.node) : state.view;
+  for (const el of document.querySelectorAll('#snav .tnode')) el.classList.remove('active');
+  const map = {
+    overview: 'nav-overview', all: 'nav-all', user: 'nav-user', review: 'nav-review',
+    stats: 'nav-stats', audit: 'nav-audit', admin: 'nav-admin',
+  };
+  const id = map[key];
+  if (id && !$(id).hidden) $(id).classList.add('active');
+  if (state.view === 'memories') {
+    for (const el of document.querySelectorAll('#proj-tree .tnode[data-key]')) {
+      el.classList.toggle('active', el.dataset.key === key);
+    }
+  }
+}
+
+function renderDatalists() {
+  const devices = new Set(state.devices.map((d) => d.name));
+  const agents = new Set();
+  for (const p of state.tree?.projects || []) for (const d of p.devices) {
+    if (d.name) devices.add(d.name);
+    for (const a of d.agents) agents.add(a.name);
+  }
+  $('dl-devices').innerHTML = [...devices].sort().map((d) => `<option value="${esc(d)}">`).join('');
+  $('dl-agents').innerHTML = [...agents].sort().map((a) => `<option value="${esc(a)}">`).join('');
+}
+
+/* ---------------- navigation ---------------- */
+function setView(view, opts = {}) {
+  state.view = view;
+  for (const v of ['overview', 'memories', 'review', 'audit', 'stats', 'admin']) {
+    $('view-' + v).hidden = v !== view;
+  }
+  $('layer-strip').hidden = !(view === 'memories' || view === 'review');
+  $('sidebar').classList.remove('open');
+  if (view === 'memories') { state.offset = 0; loadMemories(); renderLayerStrip(); }
+  else if (view === 'overview') loadOverview();
+  else if (view === 'review') { renderLayerStrip(); loadReview(); }
+  else if (view === 'audit') loadAudit();
+  else if (view === 'stats') loadStats();
+  else if (view === 'admin') loadAdmin();
+  markActiveNav();
+}
+
+function setNode(node) {
+  state.node = node;
+  if (state.view !== 'memories') state.view = 'memories';
+  for (const v of ['overview', 'memories', 'review', 'audit', 'stats', 'admin']) {
+    $('view-' + v).hidden = v !== 'memories';
+  }
+  $('layer-strip').hidden = false;
+  state.offset = 0;
+  loadMemories();
+  renderLayerStrip();
+  markActiveNav();
+  $('sidebar').classList.remove('open');
+}
+
+function nodeParams(node) {
+  const p = new URLSearchParams();
+  switch (node.type) {
+    case 'all': break;
+    case 'layer':
+      if (node.scope === 'user') { p.set('scope', 'user'); }
+      else if (node.project) { p.set('project', node.project); p.set('scope', node.scope); }
+      else p.set('scope', node.scope);
+      break;
+    case 'user':
+      if (state.tree?.user) { p.set('project', state.tree.user.id); p.set('scope', 'user'); }
+      else p.set('scope', 'user');
+      break;
+    case 'project': p.set('project', node.project); break;
+    case 'device':
+      p.set('project', node.project); p.set('scope', 'device'); p.set('device', node.device);
+      break;
+    case 'agent':
+      p.set('project', node.project); p.set('scope', 'agent');
+      p.set('device', node.device === null ? '' : node.device);
+      p.set('agent', node.agent);
+      break;
+  }
+  return p;
+}
+
+/* ---------------- layer strip ---------------- */
+function renderLayerStrip() {
+  const strip = $('layer-strip');
+  const node = state.node;
+  const seg = (cls, icon, label, on, target) =>
+    `<span class="seg ${cls} ${on ? 'on-' + cls : ''}" ${target ? `data-node="${esc(JSON.stringify(target))}"` : ''}>${icon} ${esc(label)}</span>`;
+  const arrow = '<span class="seg-arrow">›</span>';
+  let row = '', exp = '';
+
+  const projName = node.project ? projectName(node.project) : null;
+  if (node.type === 'all') {
+    row = seg('project', '🌐', '全部记忆 · 跨项目与全部作用域', true);
+    exp = '跨所有可访问项目、全部作用域层的记忆。';
+  } else if (node.type === 'layer' && !node.project) {
+    const m = LAYER_META[node.scope];
+    row = seg(node.scope, m.icon, m.name, true);
+    exp = m.expl;
+  } else if (node.type === 'user') {
+    row = seg('user', '👤', '用户级（跨项目）', true);
+    exp = LAYER_META.user.expl;
+  } else if (node.type === 'project') {
+    row = seg('user', '👤', '用户级', false, { type: 'user' }) + arrow +
+      seg('project', '🗂', projName, true, { type: 'project', project: node.project });
+    exp = `项目 <b>${esc(projName)}</b> 的全部记忆 — 按作用域层分组展示（项目级 / 设备级 / 工具级）。`;
+  } else if (node.type === 'device') {
+    row = seg('user', '👤', '用户级', false, { type: 'user' }) + arrow +
+      seg('project', '🗂', projName, false, { type: 'project', project: node.project }) + arrow +
+      seg('device', '💻', node.device, true);
+    exp = `<b>${esc(node.device)}</b> · ${LAYER_META.device.expl}`;
+  } else if (node.type === 'agent') {
+    row = seg('user', '👤', '用户级', false, { type: 'user' }) + arrow +
+      seg('project', '🗂', projName, false, { type: 'project', project: node.project }) + arrow +
+      seg('device', '💻', node.device === null ? '全设备' : node.device, node.device !== null, node.device === null ? null : { type: 'device', project: node.project, device: node.device }) + arrow +
+      seg('agent', '🔧', node.agent, true);
+    exp = `<b>${node.device === null ? '全设备' : esc(node.device)} × ${esc(node.agent)}</b> · ${LAYER_META.agent.expl}`;
+  } else if (node.type === 'layer' && node.project) {
+    const m = LAYER_META[node.scope];
+    row = seg('user', '👤', '用户级', false, { type: 'user' }) + arrow +
+      seg('project', '🗂', projName, false, { type: 'project', project: node.project }) + arrow +
+      seg(node.scope, m.icon, m.name, true);
+    exp = `<b>${esc(projName)} · ${m.name}</b> — ${m.expl}`;
+  }
+
+  let actions = '';
+  if (state.view === 'memories' && (node.type === 'project' || node.type === 'device' || node.type === 'agent' || (node.type === 'layer' && node.project))) {
+    actions = `<button class="ghost" id="strip-brief" style="font-size:12px">👁 简报预览</button>`;
+  }
+  strip.innerHTML = `<div class="strip-row">${row}<div class="strip-actions">${actions}</div></div><div class="strip-exp">${exp}</div>`;
+  strip.querySelectorAll('.seg[data-node]').forEach((el) => {
+    el.onclick = () => setNode(JSON.parse(el.dataset.node));
+  });
+  const briefBtn = $('strip-brief');
+  if (briefBtn) briefBtn.onclick = openBrief;
+}
+
+/* ---------------- memories ---------------- */
+async function loadMemories(append = false) {
+  const p = nodeParams(state.node);
+  if (state.query) p.set('query', state.query);
+  if (state.kind) p.set('kind', state.kind);
+  if (state.status) p.set('status', state.status);
+  p.set('limit', '50');
+  p.set('offset', String(append ? state.offset : 0));
+  try {
+    const res = await api('/api/memories?' + p);
+    // Project views: user-level rows ride along by design (MCP parity); they
+    // belong to the user node, so drop them from project-scoped browsing.
+    let hits = res.hits;
+    if (state.node.type === 'project' || (state.node.type === 'layer' && state.node.project)) {
+      hits = hits.filter((h) => h.scope !== 'user');
+    }
+    state.hits = append ? state.hits.concat(hits) : hits;
+    state.more = res.hits.length >= 50;
+    state.offset = append ? state.offset + res.hits.length : res.hits.length;
+    state.warnings = res.warnings || [];
+    renderMemories();
+  } catch (e) {
+    if (e.message !== '请先登录' && e.message !== 'unauthorized') toast('加载失败：' + e.message, 'err');
+  }
+}
+
+function groupOf(m) {
+  if (m.scope === 'user') return { key: 'u:user', order: 0 };
+  if (m.scope === 'project') return { key: 'p:project', order: 1 };
+  if (m.scope === 'device') return { key: 'd:' + m.device, order: 2 };
+  return { key: 'a:' + m.device + '/' + m.agent, order: 3 };
+}
+
+function memCard(m, showProject) {
+  const scopeChip = m.scope === 'user' ? '<span class="sc-chip cu">👤 用户级</span>'
+    : m.scope === 'device' ? `<span class="sc-chip cd">💻 ${esc(m.device)}</span>`
+    : m.scope === 'agent' ? `<span class="sc-chip ca">🔧 ${esc(m.device === null ? '全设备' : m.device)} × ${esc(m.agent)}</span>`
+    : (showProject ? `<span class="sc-chip cp">🗂 ${esc(projectName(m.project_id))}</span>` : '');
+  const projChip = showProject && m.scope !== 'user' ? `<span class="sc-chip" style="background:var(--panel3);color:var(--dim)">${esc(projectName(m.project_id))}</span>` : '';
+  return `
+  <div class="mem-card c-${m.scope}" data-id="${esc(m.id)}">
+    <div class="mc-head">
+      ${m.pinned ? '<span class="pin">★</span>' : ''}
+      <span class="mc-title">${esc(m.title)}</span>
+      <span class="badge k-${m.kind}">${KIND_LABEL[m.kind] || m.kind}</span>
+      ${scopeChip}${projChip}
+      ${m.status !== 'active' ? `<span class="st-${m.status}">${m.status}</span>` : ''}
+      ${m.revision_count > 1 ? `<span class="rev-badge">修订 ×${m.revision_count}</span>` : ''}
+      ${m.needsReview ? '<span class="review-flag">⏰ 复审到期</span>' : ''}
+    </div>
+    <div class="mc-snip">${esc(m.snippet)}</div>
+    <div class="mc-meta">
+      <div class="bar" title="重要性 ${m.importance}"><i style="width:${Math.round(m.importance * 100)}%"></i></div>
+      ${m.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}
+      <span class="mc-date">${fmtDate(m.updated_at)}</span>
+    </div>
+  </div>`;
+}
+
+function renderMemories() {
+  const box = $('view-memories');
+  const searching = !!state.query;
+  let html = '';
+
+  if (state.warnings.length) {
+    html += state.warnings.map((w) => `<div class="warn-banner">⚠ ${esc(w)}</div>`).join('');
+  }
+  if (state.hits.length === 0) {
+    html += `<div class="empty">暂无记忆<br><span style="font-size:12px">点击右上角「＋ 新记忆」写入，或让 agent 通过 MCP 写入第一条</span></div>`;
+  } else if (state.layout === 'table') {
+    const showProject = state.node.type === 'all' || (state.node.type === 'layer' && !state.node.project);
+    html += `<table class="list"><thead><tr><th></th><th>标题</th><th>类型</th><th>作用域</th><th>重要性</th><th>状态</th><th>更新</th></tr></thead><tbody>`;
+    for (const m of state.hits) {
+      const scopeChip = m.scope === 'user' ? '<span class="sc-chip cu">👤</span>'
+        : m.scope === 'device' ? `<span class="sc-chip cd">💻 ${esc(m.device)}</span>`
+        : m.scope === 'agent' ? `<span class="sc-chip ca">🔧 ${esc(m.agent)}</span>`
+        : `<span class="sc-chip cp">🗂 ${esc(showProject ? projectName(m.project_id) : '项目级')}</span>`;
+      html += `<tr class="rowlink" data-id="${esc(m.id)}">
+        <td>${m.pinned ? '<span class="pin">★</span>' : ''}</td>
+        <td><div class="t">${esc(m.title)} ${m.revision_count > 1 ? `<span class="rev-badge">×${m.revision_count}</span>` : ''} ${m.needsReview ? '<span class="review-flag">⏰</span>' : ''}</div><div class="s">${esc(m.snippet)}</div></td>
+        <td><span class="badge k-${m.kind}">${KIND_LABEL[m.kind] || m.kind}</span></td>
+        <td>${scopeChip}</td>
+        <td><div class="bar"><i style="width:${Math.round(m.importance * 100)}%"></i></div></td>
+        <td class="st-${m.status}">${m.status}</td>
+        <td style="color:var(--faint);font-size:12px">${fmtDate(m.updated_at)}</td></tr>`;
+    }
+    html += '</tbody></table>';
+  } else if (searching) {
+    const showProject = state.node.type === 'all' || (state.node.type === 'layer' && !state.node.project);
+    html += `<div class="mgroup"><div class="mgroup-head"><span class="gi">🔎</span><span class="gt">搜索结果</span><span class="gn">${state.hits.length} 条${state.more ? '（未完）' : ''}</span></div>`;
+    html += state.hits.map((m) => memCard(m, showProject)).join('') + '</div>';
+  } else {
+    const showProject = state.node.type === 'all' || (state.node.type === 'layer' && !state.node.project);
+    const groups = new Map();
+    for (const m of state.hits) {
+      const g = groupOf(m);
+      if (!groups.has(g.key)) groups.set(g.key, { ...g, items: [] });
+      groups.get(g.key).items.push(m);
+    }
+    const ordered = [...groups.values()].sort((a, b) => a.order - b.order || b.items.length - a.items.length);
+    for (const g of ordered) {
+      let icon, title, sub;
+      if (g.key === 'u:user') { icon = LAYER_META.user.icon; title = '用户级'; sub = '跨项目 · 简报最优先'; }
+      else if (g.key === 'p:project') { icon = LAYER_META.project.icon; title = '项目级'; sub = '项目通用 · 所有设备与工具可见'; }
+      else if (g.key.startsWith('d:')) { const d = g.key.slice(2); icon = LAYER_META.device.icon; title = '设备级 · ' + d; sub = `仅 ${d} 上的会话可见`; }
+      else { const [d, a] = g.key.slice(2).split('/'); icon = LAYER_META.agent.icon; title = `工具级 · ${d === 'null' ? '全设备' : d} × ${a}`; sub = `仅 ${d === 'null' ? '任意设备' : d} 上的 ${a} 会话可见`; }
+      html += `<div class="mgroup t-${g.key === 'u:user' ? 'user' : g.key === 'p:project' ? 'project' : g.key.startsWith('d:') ? 'device' : 'agent'}">
+        <div class="mgroup-head"><span class="gi">${icon}</span><span class="gt">${esc(title)}</span><span class="gs">${esc(sub)}</span><span class="gn">${g.items.length} 条</span></div>
+        ${g.items.map((m) => memCard(m, showProject)).join('')}</div>`;
+    }
+  }
+  if (state.more) html += `<button class="loadmore" id="load-more">加载更多</button>`;
+  box.innerHTML = html;
+  box.querySelectorAll('[data-id]').forEach((el) => { el.onclick = () => openDetail(el.dataset.id); });
+  const more = $('load-more');
+  if (more) more.onclick = () => loadMemories(true);
+}
+
+/* ---------------- overview ---------------- */
+async function loadOverview() {
+  const t = state.tree;
+  if (!t) return;
+  const layerTotal = (scope) => {
+    if (scope === 'user') return t.user?.count || 0;
+    let n = 0;
+    for (const p of t.projects) {
+      if (scope === 'project') n += p.project.count;
+      else if (scope === 'device') n += p.devices.reduce((s, d) => s + d.count, 0);
+      else n += p.devices.reduce((s, d) => s + d.agents.reduce((x, a) => x + a.count, 0), 0);
+    }
+    return n;
+  };
+  const card = (scope) => {
+    const m = LAYER_META[scope];
+    return `<div class="layer-card lc-${scope}" data-scope="${scope}">
+      <div class="ic">${m.icon}</div><div class="v">${layerTotal(scope)}</div>
+      <div class="k">${m.name}</div><div class="d">${m.expl}</div></div>`;
+  };
+  let html = `<div class="view-title">记忆层次总览</div>
+    <div class="view-sub">HiveMem 用四层作用域组织记忆：用户级跨项目加载，项目级是主体知识，设备级与工具级按上下文可见 — 匹配规则同 git config：请求上下文逐层收窄。</div>
+    <div class="layer-grid">${card('user')}${card('project')}${card('device')}${card('agent')}</div>`;
+  if (state.reviewCount > 0) {
+    html += `<div class="banner" id="ov-review">⏰ ${state.reviewCount} 条记忆复审到期（内容可能过时）<a>去复审 →</a></div>`;
+  }
+  html += `<div class="section-h">项目</div><div class="proj-grid">`;
+  for (const p of t.projects) {
+    const mine = !state.me || state.me.role === 'admin' || p.owner_user_id === state.me.id;
+    const devN = p.devices.reduce((s, d) => s + d.count, 0);
+    const agN = p.devices.reduce((s, d) => s + d.agents.reduce((x, a) => x + a.count, 0), 0);
+    const tot = p.project.count + devN + agN || p.active_count;
+    const w = (n) => tot ? Math.round(n / tot * 100) : 0;
+    html += `<div class="proj-card" data-proj="${esc(p.id)}">
+      <div class="name">🗂 ${esc(p.name)}${mine ? '' : ' <span class="ro-badge">只读</span>'}</div>
+      <div class="meta">${tot} 条活跃${p.last_memory_at ? ' · 最近 ' + fmtDay(p.last_memory_at) : ''}${p.root_path ? ' · ' + esc(p.root_path) : ''}</div>
+      <div class="mini-dist">
+        <i style="width:${w(p.project.count)}%;background:var(--sc-project)"></i>
+        <i style="width:${w(devN)}%;background:var(--sc-device)"></i>
+        <i style="width:${w(agN)}%;background:var(--sc-agent)"></i>
+      </div>
+      <div class="dist-legend">
+        <span><i class="dot" style="background:var(--sc-project)"></i>项目级 ${p.project.count}</span>
+        <span><i class="dot" style="background:var(--sc-device)"></i>设备级 ${devN}</span>
+        <span><i class="dot" style="background:var(--sc-agent)"></i>工具级 ${agN}</span>
+      </div></div>`;
+  }
+  html += '</div>';
+  const box = $('view-overview');
+  box.innerHTML = html;
+  box.querySelectorAll('.layer-card').forEach((el) => {
+    el.onclick = () => {
+      const scope = el.dataset.scope;
+      setNode(scope === 'user' ? { type: 'user' } : { type: 'layer', scope });
+    };
+  });
+  const rv = $('ov-review');
+  if (rv) rv.onclick = () => setView('review');
+  box.querySelectorAll('.proj-card').forEach((el) => {
+    el.onclick = () => { state.expanded[el.dataset.proj] = true; setNode({ type: 'project', project: el.dataset.proj }); };
+  });
+}
+
+/* ---------------- detail drawer ---------------- */
+async function openDetail(id) {
+  try {
+    const res = await api('/api/memories/' + encodeURIComponent(id));
+    state.detail = res.memory;
+    state.chain = res.chain || null;
+    renderDetail();
+    $('drawer').classList.add('open');
+  } catch (e) { toast('读取失败：' + e.message, 'err'); }
+}
+
+function closeDetail() { $('drawer').classList.remove('open'); }
+
+function mdLite(text) {
+  let t = esc(text);
+  t = t.replace(/```([\s\S]*?)```/g, (_, code) => `<pre><code>${code.replace(/^\n+|\n+$/g, '')}</code></pre>`);
+  t = t.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  t = t.replace(/^#### (.*)$/gm, '<h5>$1</h5>').replace(/^### (.*)$/gm, '<h4>$1</h4>').replace(/^## (.*)$/gm, '<h3>$1</h3>');
+  t = t.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
+  t = t.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  t = t.replace(/^[-*] (.*)$/gm, '<li>$1</li>');
+  t = t.replace(/^(?!<h\d|<li|<pre|<code|<\/)(.+)$/gm, '<p>$1</p>');
+  return t;
+}
+
+/* 版本历史：列出已被取代的历史版本，点一下读该版本快照（只读，不改 state.detail，
+   避免和历史内容走编辑按钮）。 */
+async function loadRevisions(m) {
+  const host = $('dw-revisions');
+  if (!host) return;
+  try {
+    const data = await api(`/api/memories/${encodeURIComponent(m.id)}/revisions`);
+    const rows = data.revisions || [];
+    const current = data.current_version ?? m.version;
+    host.innerHTML = `<button class="ver-row on" data-v="${current}">v${current} · 当前版本 · ${fmtDate(m.updated_at)}</button>`
+      + rows.map((r) => `<button class="ver-row" data-v="${r.version}">v${r.version} · ${esc(r.action)} · ${fmtDate(r.ts)}${r.actor ? ' · ' + esc(r.actor) : ''}</button>`).join('')
+      + `<pre class="ver-snap" id="dw-ver-snap" hidden></pre>`;
+    host.querySelectorAll('.ver-row').forEach((el) => {
+      el.onclick = () => showSnapshot(m.id, Number(el.dataset.v), el);
+    });
+  } catch (e) {
+    host.innerHTML = `<span style="color:var(--red);font-size:12px">版本历史加载失败：${esc(e.message)}</span>`;
+  }
+}
+
+async function showSnapshot(id, version, btn) {
+  const pre = $('dw-ver-snap');
+  if (!pre) return;
+  pre.hidden = false;
+  pre.textContent = '读取中…';
+  try {
+    const data = await api(`/api/memories/${encodeURIComponent(id)}?at_version=${version}`);
+    const snap = data.memory;
+    pre.textContent = `# v${version}${version === data.live_version ? '（当前）' : '（历史快照，只读）'}\n`
+      + `标题：${snap.title}\n状态：${snap.status}\n更新：${fmtDate(snap.updated_at)}\n\n${snap.content}`;
+    $('dw-revisions').querySelectorAll('.ver-row').forEach((el) => el.classList.toggle('on', el === btn));
+  } catch (e) {
+    pre.textContent = '读取失败：' + e.message;
+  }
+}
+
+function renderDetail() {
+  const m = state.detail;
+  if (!m) return;
+  $('dw-title').textContent = m.title;
+  const scopeChip = m.scope === 'user' ? '<span class="sc-chip cu">👤 用户级 · 跨项目</span>'
+    : m.scope === 'device' ? `<span class="sc-chip cd">💻 设备级 · ${esc(m.device)}</span>`
+    : m.scope === 'agent' ? `<span class="sc-chip ca">🔧 工具级 · ${esc(m.device === null ? '全设备' : m.device)} × ${esc(m.agent)}</span>`
+    : '<span class="sc-chip cp">🗂 项目级</span>';
+  $('dw-badges').innerHTML = `
+    ${m.pinned ? '<span class="pin">★ 置顶</span>' : ''}
+    <span class="badge k-${m.kind}">${KIND_LABEL[m.kind] || m.kind}</span>
+    ${scopeChip}
+    <span class="st-${m.status}">${m.status}</span>
+    <span class="ver-badge" title="当前版本号，写入时带 expected_version 可避免覆盖他人改动">v${m.version}</span>
+    ${m.revision_count > 1 ? `<span class="rev-badge">修订 ×${m.revision_count}</span>` : ''}
+    ${m.needsReview ? '<span class="review-flag">⏰ 复审到期</span>' : ''}`;
+
+  let body = '';
+  body += `<div class="dw-sec"><div class="dw-content">${mdLite(m.content)}</div></div>`;
+
+  if (state.chain && state.chain.length > 1) {
+    body += `<div class="dw-sec"><h4>演进链（${state.chain.length} 个版本）</h4><div class="chain">`;
+    for (const c of state.chain) {
+      body += `<div class="chain-item ${c.id === m.id ? 'current' : ''}" data-cid="${esc(c.id)}">
+        <div class="ci-t">${esc(c.title)}</div>
+        <div class="ci-d">${fmtDay(c.created_at)} · ${c.status}${c.id === m.id ? ' · 当前' : ''}</div></div>`;
+    }
+    body += '</div></div>';
+  }
+
+  body += `<div class="dw-sec"><h4>元数据</h4><div class="meta-grid">
+    <span class="mk">ID</span><span class="mv"><a id="dw-copy-id" title="点击复制">${esc(m.id)}</a></span>
+    <span class="mk">项目</span><span class="mv">${esc(projectName(m.project_id))}</span>
+    <span class="mk">创建 / 更新</span><span class="mv">${fmtDate(m.created_at)} / ${fmtDate(m.updated_at)}</span>
+    <span class="mk">来源</span><span class="mv">${esc(m.source_agent || '—')}</span>
+    ${m.device !== null ? `<span class="mk">设备标签</span><span class="mv">${esc(m.device)}</span>` : ''}
+    ${m.agent !== null ? `<span class="mk">工具标签</span><span class="mv">${esc(m.agent)}</span>` : ''}
+    ${m.topic_key ? `<span class="mk">主题键</span><span class="mv">${esc(m.topic_key)}（修订 ×${m.revision_count}）</span>` : ''}
+    <span class="mk">重要性</span><span class="mv">${m.importance}</span>
+    ${m.tags.length ? `<span class="mk">标签</span><span class="mv">${m.tags.map((t) => esc(t)).join('、')}</span>` : ''}
+    ${m.review_after ? `<span class="mk">复审周期</span><span class="mv" ${m.needsReview ? 'style="color:var(--orange)"' : ''}>${fmtDay(m.review_after)}${m.needsReview ? ' · 已到期' : ''}</span>` : ''}
+    ${m.expires_at ? `<span class="mk">过期时间</span><span class="mv">${fmtDate(m.expires_at)}</span>` : ''}
+    ${m.last_accessed_at ? `<span class="mk">最近读取</span><span class="mv">${fmtDate(m.last_accessed_at)}</span>` : ''}
+    ${m.supersedes ? `<span class="mk">取代</span><span class="mv">${esc(m.supersedes)}</span>` : ''}
+  </div></div>`;
+
+  if (Array.isArray(m.evidence) && m.evidence.length) {
+    body += `<div class="dw-sec"><h4>证据链（${m.evidence.length}）</h4><div class="ev-list">`;
+    for (const ev of m.evidence) {
+      body += `<div class="ev-item"><span class="ev-kind">${esc(ev.kind)}</span><div style="min-width:0">
+        <div class="ev-loc" title="可复核的定位符：会话轮次 / 文件:行 / URL / 命令">${esc(ev.locator)}</div>
+        ${ev.quote ? `<div class="ev-quote">${esc(ev.quote)}</div>` : ''}</div></div>`;
+    }
+    body += '</div></div>';
+  }
+
+  body += `<div class="dw-sec"><h4>版本历史</h4><div id="dw-revisions"><span style="color:var(--faint);font-size:12px">加载中…</span></div></div>`;
+  $('dw-body').innerHTML = body;
+  loadRevisions(m);
+
+  const writable = (() => {
+    if (!state.me || state.me.role === 'admin') return true;
+    if (state.tree?.user && m.project_id === state.tree.user.id) return true; // own '@user'
+    const p = state.tree?.projects.find((x) => x.id === m.project_id);
+    return p ? p.owner_user_id === state.me.id : false;
+  })();
+
+  $('dw-foot').innerHTML = writable ? `
+    <button id="dw-edit">编辑</button>
+    <button id="dw-newver" title="创建新版本取代此记忆，旧记忆保留为历史">↻ 新版本取代</button>
+    ${m.needsReview ? '<button id="dw-review">✔ 标记已复审</button>' : ''}
+    <span class="spacer"></span>
+    <button id="dw-archive">${m.status === 'archived' ? '恢复 active' : '归档'}</button>
+    <button class="danger-text" id="dw-delete">删除</button>` : '<span style="color:var(--faint);font-size:12px">只读（无写入权限）</span>';
+
+  $('dw-copy-id').onclick = () => {
+    navigator.clipboard?.writeText(m.id).then(() => toast('已复制 ' + m.id, 'ok')).catch(() => {});
+  };
+  $('dw-body').querySelectorAll('.chain-item').forEach((el) => {
+    el.onclick = () => openDetail(el.dataset.cid);
+  });
+  if (!writable) return;
+  $('dw-edit').onclick = () => openEditor(m);
+  $('dw-newver').onclick = () => openEditor(null, { supersedes: m });
+  const rv = $('dw-review');
+  if (rv) rv.onclick = async () => {
+    try {
+      await api('/api/review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: m.id, project: m.project_id }) });
+      toast('复审周期已重置', 'ok');
+      openDetail(m.id); loadReviewCount(); if (state.view === 'memories') loadMemories();
+    } catch (e) { toast('操作失败：' + e.message, 'err'); }
+  };
+  $('dw-archive').onclick = async () => {
+    try {
+      await api('/api/memories/' + encodeURIComponent(m.id), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: m.status === 'archived' ? 'active' : 'archived' }),
+      });
+      toast(m.status === 'archived' ? '已恢复 active' : '已归档', 'ok');
+      openDetail(m.id); loadTree(); if (state.view === 'memories') loadMemories();
+    } catch (e) { toast('操作失败：' + e.message, 'err'); }
+  };
+  $('dw-delete').onclick = async () => {
+    if (!confirm('确定永久删除这条记忆？（归档可保留历史）')) return;
+    try {
+      await api('/api/memories/' + encodeURIComponent(m.id), { method: 'DELETE' });
+      toast('已删除', 'ok');
+      closeDetail(); loadTree(); loadReviewCount(); if (state.view === 'memories') loadMemories();
+    } catch (e) { toast('删除失败：' + e.message, 'err'); }
+  };
+}
+
+/* ---------------- editor ---------------- */
+function currentScopeOf(m) {
+  if (!m) return 'project';
+  return m.scope || 'project';
+}
+
+function openEditor(mem, preset = {}) {
+  state.editing = mem || null;
+  state.editingPreset = preset;
+  const isNew = !mem;
+  $('ed-title').textContent = isNew ? (preset.supersedes ? '新版本（取代旧记忆）' : '新记忆') : '编辑记忆';
+
+  // scope picker preselect
+  let scope;
+  if (isNew) {
+    const n = state.node;
+    if (preset.supersedes) scope = currentScopeOf(preset.supersedes);
+    else if (n.type === 'user') scope = 'user';
+    else if (n.type === 'device') scope = 'device';
+    else if (n.type === 'agent') scope = 'agent';
+    else if (n.type === 'layer') scope = n.scope;
+    else scope = 'project';
+  } else {
+    scope = currentScopeOf(mem);
+  }
+  setEditorScope(scope, false);
+
+  // project select
+  const sel = $('ed-project');
+  sel.innerHTML = '';
+  if (state.tree?.user) {
+    const o = document.createElement('option');
+    o.value = state.tree.user.id; o.textContent = '👤 @user（用户级）';
+    sel.appendChild(o);
+  }
+  for (const p of state.tree?.projects || []) {
+    const o = document.createElement('option');
+    o.value = p.id; o.textContent = '🗂 ' + p.name;
+    sel.appendChild(o);
+  }
+
+  const src = mem || preset.supersedes || {};
+  if (isNew) {
+    const n = state.node;
+    let pid = '';
+    if (preset.supersedes) pid = preset.supersedes.project_id;
+    else if (n.type === 'project' || n.type === 'device' || n.type === 'agent') pid = n.project;
+    else if (n.type === 'layer' && n.project) pid = n.project;
+    sel.value = pid;
+    $('ed-title-input').value = '';
+    $('ed-content').value = '';
+    $('ed-kind').value = 'fact';
+    $('ed-importance').value = '0.5';
+    $('ed-status').value = 'active';
+    $('ed-tags').value = '';
+    $('ed-topic').value = '';
+    $('ed-ttl').value = '';
+    $('ed-pinned').checked = false;
+    $('ed-delete').hidden = true;
+    if (preset.supersedes) {
+      $('ed-title-input').value = src.title || '';
+      $('ed-content').value = src.content || '';
+      $('ed-kind').value = src.kind || 'fact';
+      $('ed-importance').value = src.importance ?? 0.5;
+      $('ed-tags').value = (src.tags || []).join(', ');
+      $('ed-topic').value = src.topic_key || '';
+      $('ed-pinned').checked = !!src.pinned;
+    }
+    $('ed-meta').textContent = preset.supersedes ? `将取代 ${src.id}（保存后旧记忆标记为 superseded，演进链保留）` : '';
+  } else {
+    sel.value = mem.project_id;
+    $('ed-title-input').value = mem.title;
+    $('ed-content').value = mem.content;
+    $('ed-kind').value = mem.kind;
+    $('ed-importance').value = mem.importance;
+    $('ed-status').value = mem.status;
+    $('ed-tags').value = mem.tags.join(', ');
+    $('ed-topic').value = mem.topic_key || '';
+    $('ed-ttl').value = mem.expires_at ? String(Math.max(0, Math.ceil((new Date(mem.expires_at) - Date.now()) / 86400000))) : '';
+    $('ed-pinned').checked = mem.pinned;
+    $('ed-delete').hidden = false;
+    const extra = [];
+    if (mem.device !== null) extra.push('设备 ' + mem.device);
+    if (mem.agent !== null) extra.push('工具 ' + mem.agent);
+    if (mem.expires_at) extra.push('过期于 ' + fmtDate(mem.expires_at));
+    $('ed-meta').textContent = `${mem.id} · 创建于 ${fmtDate(mem.created_at)} · 来源 ${mem.source_agent || '未知'}${extra.length ? ' · ' + extra.join(' · ') : ''}`;
+  }
+
+  // device/agent prefill
+  const devInput = $('ed-device');
+  const agentInput = $('ed-agent');
+  if (isNew) {
+    const n = state.node;
+    if (preset.supersedes) { devInput.value = src.device ?? ''; agentInput.value = src.agent ?? ''; }
+    else if (n.type === 'device') { devInput.value = n.device; agentInput.value = ''; }
+    else if (n.type === 'agent') { devInput.value = n.device === null ? '' : n.device; agentInput.value = n.agent; }
+    else { devInput.value = ''; agentInput.value = ''; }
+  } else {
+    devInput.value = mem.device ?? '';
+    agentInput.value = mem.agent ?? '';
+  }
+
+  $('modal-editor').hidden = false;
+  $('ed-title-input').focus();
+}
+
+function setEditorScope(scope, focus = true) {
+  for (const opt of document.querySelectorAll('#ed-scope-grid .scope-opt')) {
+    const on = opt.dataset.scope === scope;
+    opt.classList.toggle('sel', on);
+    opt.querySelector('input').checked = on;
+  }
+  const showTags = scope === 'device' || scope === 'agent';
+  $('ed-tag-row').hidden = !showTags;
+  $('ed-agent-field').hidden = scope !== 'agent';
+  $('ed-project-field').style.display = scope === 'user' ? 'none' : '';
+  if (focus && showTags) $('ed-device').focus();
+}
+
+async function saveEditor() {
+  const isNew = !state.editing;
+  const scope = document.querySelector('#ed-scope-grid input:checked')?.value || 'project';
+  const body = {
+    title: $('ed-title-input').value,
+    content: $('ed-content').value,
+    kind: $('ed-kind').value,
+    importance: Number($('ed-importance').value) || 0,
+    status: $('ed-status').value,
+    pinned: $('ed-pinned').checked,
+    tags: $('ed-tags').value.split(',').map((s) => s.trim()).filter(Boolean),
+  };
+  const topic = $('ed-topic').value.trim();
+  const ttlRaw = $('ed-ttl').value.trim();
+  if (ttlRaw !== '') body.ttl_days = Number(ttlRaw) || 0;
+
+  // Scope tags: explicit device/agent so the panel can target any device,
+  // never the hub host's own identity (empty string = tag NULL).
+  if (scope === 'device') {
+    if (!$('ed-device').value.trim()) { toast('设备级记忆需要设备名', 'err'); return; }
+    body.device = $('ed-device').value.trim();
+  } else if (scope === 'agent') {
+    if (!$('ed-agent').value.trim()) { toast('工具级记忆需要工具名', 'err'); return; }
+    body.device = $('ed-device').value.trim();
+    body.agent = $('ed-agent').value.trim();
+  }
+
+  try {
+    if (isNew) {
+      body.scope = scope;
+      if (scope !== 'user') body.project = $('ed-project').value;
+      if (topic) body.topic_key = topic;
+      if (state.editingPreset?.supersedes) body.supersedes = state.editingPreset.supersedes.id;
+      await api('/api/memories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      toast('已写入', 'ok');
+    } else {
+      const m = state.editing;
+      const projectId = $('ed-project').value;
+      if (projectId && projectId !== m.project_id) body.project = projectId;
+      // Send scope when it changed OR when the device/agent tag values moved
+      // (tag-only migration, e.g. re-assigning a memory to another device).
+      // Never re-send an unchanged scope: it would re-tag from the hub host.
+      const scopeChanged = scope !== (m.scope || 'project');
+      const devVal = $('ed-device').value.trim();
+      const agentVal = $('ed-agent').value.trim();
+      const tagChanged = (scope === 'device' || scope === 'agent') && devVal !== (m.device ?? '');
+      const agentChanged = scope === 'agent' && agentVal !== (m.agent ?? '');
+      if (scopeChanged || tagChanged || agentChanged) {
+        body.scope = scope;
+        if (scope === 'device') body.device = devVal;
+        if (scope === 'agent') { body.device = devVal; body.agent = agentVal; }
+      }
+      if (topic !== (m.topic_key || '')) body.topic_key = topic || null;
+      await api('/api/memories/' + encodeURIComponent(m.id), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      toast('已保存', 'ok');
+    }
+    $('modal-editor').hidden = true;
+    loadTree(); loadReviewCount();
+    if (state.view === 'memories') loadMemories();
+    if (state.detail) openDetail(state.detail.id);
+  } catch (e) { toast('保存失败：' + e.message, 'err'); }
+}
+
+/* ---------------- review ---------------- */
+async function loadReview() {
+  try {
+    const { overdue } = await api('/api/review');
+    const box = $('view-review');
+    if (!overdue.length) {
+      box.innerHTML = '<div class="empty">✅ 没有到期需要复审的记忆</div>';
+      return;
+    }
+    let html = `<div class="view-title">复审队列</div>
+      <div class="view-sub">review_after 已到期的活跃记忆 — 内容可能过时（仅标记，不隐藏）。点击「已复审」按类型默认周期重新起算。</div>`;
+    html += overdue.map((r) => `
+      <div class="mem-card c-project" style="cursor:default">
+        <div class="mc-head">
+          <span class="mc-title">${esc(r.title)}</span>
+          <span class="badge k-${r.kind}">${KIND_LABEL[r.kind] || r.kind}</span>
+          <span class="sc-chip cp">🗂 ${esc(projectName(r.project_id))}</span>
+          ${r.revision_count > 1 ? `<span class="rev-badge">修订 ×${r.revision_count}</span>` : ''}
+          <span class="review-flag">逾期 ${r.daysOverdue} 天（${fmtDay(r.review_after)} 到期）</span>
+        </div>
+        <div class="mc-meta">
+          <button data-review-id="${esc(r.id)}" data-review-proj="${esc(r.project_id)}">✔ 标记已复审</button>
+          <button class="ghost" data-open-id="${esc(r.id)}">查看</button>
+        </div>
+      </div>`).join('');
+    box.innerHTML = html;
+    box.querySelectorAll('[data-review-id]').forEach((b) => {
+      b.onclick = async () => {
+        try {
+          await api('/api/review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: b.dataset.reviewId, project: b.dataset.reviewProj }) });
+          toast('复审周期已重置', 'ok');
+          loadReview(); loadReviewCount();
+        } catch (e) { toast('操作失败：' + e.message, 'err'); }
+      };
+    });
+    box.querySelectorAll('[data-open-id]').forEach((b) => { b.onclick = () => openDetail(b.dataset.openId); });
+  } catch (e) { toast('加载失败：' + e.message, 'err'); }
+}
+
+/* ---------------- audit ---------------- */
+async function loadAudit() {
+  try {
+    const p = new URLSearchParams({ limit: '150' });
+    const n = state.node;
+    if (n.project) p.set('project', n.project);
+    const { entries } = await api('/api/audit?' + p);
+    let html = `<div class="view-title">审计日志</div><div class="view-sub">全部写入、更新、取代、复审与读取操作（append-only）${n.project ? ' · 当前项目' : ''}</div>`;
+    if (!entries.length) { html += '<div class="empty">暂无记录</div>'; }
+    else {
+      html += `<table class="list"><thead><tr><th>时间</th><th>项目</th><th>动作</th><th>记忆</th><th>来源</th><th>详情</th></tr></thead><tbody>`;
+      for (const e of entries) {
+        let detail = '';
+        const d = e.detail || {};
+        if (d.previous?.title) detail = '旧: ' + d.previous.title;
+        else if (d.title) detail = d.title;
+        if (d.by) detail += (detail ? ' · ' : '') + '→ ' + d.by;
+        if (d.from_project) detail += ` · 来自 ${esc(d.from_project)}`;
+        if (d.topic_key) detail += ` · ${esc(d.topic_key)}`;
+        if (d.next) detail += ` · 下次 ${fmtDay(d.next)}`;
+        html += `<tr>
+          <td style="color:var(--faint);font-size:11.5px;white-space:nowrap">${fmtDate(e.ts)}</td>
+          <td style="font-size:12.5px">${esc(e.project_name || '—')}</td>
+          <td><span class="act-badge a-${e.action}">${ACTION_LABEL[e.action] || e.action}</span></td>
+          <td>${e.memory_id ? `<span class="mem-link" data-open-id="${esc(e.memory_id)}">${esc(e.memory_id)}</span>` : '—'}</td>
+          <td style="color:var(--dim);font-size:12px">${esc(e.actor || '—')}</td>
+          <td style="color:var(--dim);font-size:12px">${esc(detail)}</td></tr>`;
+      }
+      html += '</tbody></table>';
+    }
+    const box = $('view-audit');
+    box.innerHTML = html;
+    box.querySelectorAll('[data-open-id]').forEach((el) => { el.onclick = () => openDetail(el.dataset.openId); });
+  } catch (e) { toast('加载失败：' + e.message, 'err'); }
+}
+
+/* ---------------- stats ---------------- */
+async function loadStats() {
+  try {
+    const t = state.tree;
+    const devRes = await api('/api/devices');
+    state.devices = devRes.devices;
+    renderDatalists();
+    const statsRes = await api('/api/stats');
+    const emb = statsRes.embeddings;
+
+    const layerN = {
+      user: t.user?.count || 0,
+      project: t.projects.reduce((s, p) => s + p.project.count, 0),
+      device: t.projects.reduce((s, p) => s + p.devices.reduce((x, d) => x + d.count, 0), 0),
+      agent: t.projects.reduce((s, p) => s + p.devices.reduce((x, d) => x + d.agents.reduce((y, a) => y + a.count, 0), 0), 0),
+    };
+    const total = layerN.user + layerN.project + layerN.device + layerN.agent;
+    const pct = (n) => total ? (n / total * 100).toFixed(1) : 0;
+
+    let html = `<div class="view-title">统计</div>
+      <div class="view-sub">作用域层分布（活跃记忆）</div>
+      <div class="dist-big">
+        <i style="width:${pct(layerN.user)}%;background:var(--sc-user)"></i>
+        <i style="width:${pct(layerN.project)}%;background:var(--sc-project)"></i>
+        <i style="width:${pct(layerN.device)}%;background:var(--sc-device)"></i>
+        <i style="width:${pct(layerN.agent)}%;background:var(--sc-agent)"></i>
+      </div>
+      <div class="dist-legend">
+        <span><i class="dot" style="background:var(--sc-user)"></i>用户级 ${layerN.user}（${pct(layerN.user)}%）</span>
+        <span><i class="dot" style="background:var(--sc-project)"></i>项目级 ${layerN.project}（${pct(layerN.project)}%）</span>
+        <span><i class="dot" style="background:var(--sc-device)"></i>设备级 ${layerN.device}（${pct(layerN.device)}%）</span>
+        <span><i class="dot" style="background:var(--sc-agent)"></i>工具级 ${layerN.agent}（${pct(layerN.agent)}%）</span>
+      </div>`;
+
+    html += `<div class="section-h">项目作用域构成</div><table class="list">
+      <thead><tr><th>项目</th><th>项目级</th><th>设备级</th><th>工具级</th><th>构成</th></tr></thead><tbody>`;
+    for (const p of t.projects) {
+      const devN = p.devices.reduce((s, d) => s + d.count, 0);
+      const agN = p.devices.reduce((s, d) => s + d.agents.reduce((x, a) => x + a.count, 0), 0);
+      const tot = p.project.count + devN + agN || 1;
+      html += `<tr class="rowlink" data-proj="${esc(p.id)}">
+        <td class="t">🗂 ${esc(p.name)}</td>
+        <td>${p.project.count}</td><td>${devN}</td><td>${agN}</td>
+        <td><div class="mini-dist" style="width:120px">
+          <i style="width:${p.project.count / tot * 100}%;background:var(--sc-project)"></i>
+          <i style="width:${devN / tot * 100}%;background:var(--sc-device)"></i>
+          <i style="width:${agN / tot * 100}%;background:var(--sc-agent)"></i>
+        </div></td></tr>`;
+    }
+    html += '</tbody></table>';
+
+    html += `<div class="section-h">设备注册表</div><table class="list">
+      <thead><tr><th>设备名</th><th>首次登记</th><th>最近活跃</th><th>来源</th></tr></thead><tbody>`;
+    if (!state.devices.length) html += '<tr><td colspan="4" style="color:var(--faint)">暂无登记设备（agent 请求携带 X-HiveMem-Device 头时自动登记）</td></tr>';
+    for (const d of state.devices) {
+      html += `<tr><td class="t">💻 ${esc(d.name)}</td>
+        <td style="color:var(--dim);font-size:12px">${fmtDate(d.first_seen)}</td>
+        <td style="color:var(--dim);font-size:12px">${fmtDate(d.last_seen)}</td>
+        <td style="color:var(--dim);font-size:12px">${esc(d.source || '—')}</td></tr>`;
+    }
+    html += '</tbody></table>';
+
+    html += `<div class="section-h">向量索引</div>
+      <div class="stat-cards">
+        <div class="stat-card"><div class="v">${emb.embedded}/${emb.total}</div><div class="k">已嵌入 / 总记忆</div></div>
+        <div class="stat-card"><div class="v" style="font-size:15px;padding-top:6px">${esc(emb.model || '未配置')}</div><div class="k">嵌入模型${emb.dim ? ' · ' + emb.dim + ' 维' : ''}</div></div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:8px">
+        <button id="btn-gc">🧹 清扫过期记忆（TTL 到期 → 归档）</button>
+      </div>`;
+
+    const box = $('view-stats');
+    box.innerHTML = html;
+    box.querySelectorAll('tr[data-proj]').forEach((tr) => {
+      tr.onclick = () => { state.expanded[tr.dataset.proj] = true; setNode({ type: 'project', project: tr.dataset.proj }); };
+    });
+    $('btn-gc').onclick = async () => {
+      try {
+        const r = await api('/api/gc', { method: 'POST' });
+        toast(`清扫完成：${r.archived} 条过期记忆已归档`, 'ok');
+        loadTree(); loadReviewCount(); loadStats();
+      } catch (e) { toast('清扫失败：' + e.message, 'err'); }
+    };
+  } catch (e) { toast('加载失败：' + e.message, 'err'); }
+}
+
+/* ---------------- admin ---------------- */
+async function loadAdmin() {
+  if (!($('nav-admin').hidden)) {
+    try {
+      const [{ users }, { grants }] = await Promise.all([api('/api/users'), api('/api/grants')]);
+      let html = `<div class="view-title">用户与授权</div>
+        <div class="view-sub">多用户模式：MCP 令牌（agent 用）与 web 密码（人用）分离；授权 = 把某项目的只读权限开放给其他用户，写权限仅所有者与管理员。</div>
+        <div style="display:flex;gap:10px;margin-bottom:14px">
+          <button id="u-add">＋ 新建用户</button>
+          <button id="g-add">＋ 授权只读</button>
+        </div>
+        <table class="list"><thead><tr><th>用户</th><th>角色</th><th>创建时间</th><th>操作</th></tr></thead><tbody>`;
+      for (const u of users) {
+        html += `<tr><td class="t">${esc(u.name)}</td>
+          <td>${u.role === 'admin' ? '管理员' : '用户'}</td>
+          <td style="color:var(--faint);font-size:12px">${fmtDate(u.created_at)}</td>
+          <td style="font-size:12.5px">
+            <span class="mem-link" data-act="tokens" data-id="${esc(u.id)}" data-name="${esc(u.name)}">令牌</span> ·
+            <span class="mem-link" data-act="passwd" data-id="${esc(u.id)}" data-name="${esc(u.name)}">改密</span> ·
+            <span class="mem-link" data-act="role" data-id="${esc(u.id)}" data-role="${u.role}">${u.role === 'admin' ? '降为用户' : '升为管理员'}</span> ·
+            <span class="mem-link" style="color:var(--red)" data-act="del" data-id="${esc(u.id)}" data-name="${esc(u.name)}">删除</span>
+          </td></tr>`;
+      }
+      html += `</tbody></table>
+        <div class="section-h">有效授权</div>
+        <table class="list"><thead><tr><th>被授权用户</th><th>项目</th><th>授权时间</th><th>操作</th></tr></thead><tbody>`;
+      if (!grants.length) html += '<tr><td colspan="4" style="color:var(--faint)">暂无有效授权</td></tr>';
+      for (const g of grants) {
+        html += `<tr><td class="t">${esc(g.grantee_name)}</td><td>${esc(g.project_name)}</td>
+          <td style="color:var(--faint);font-size:12px">${fmtDate(g.created_at)}</td>
+          <td><span class="mem-link" style="color:var(--red)" data-revoke="${g.id}">撤销</span></td></tr>`;
+      }
+      html += '</tbody></table>';
+      const box = $('view-admin');
+      box.innerHTML = html;
+
+      box.querySelectorAll('[data-act]').forEach((el) => {
+        el.onclick = async () => {
+          const act = el.dataset.act, id = el.dataset.id, name = el.dataset.name;
+          try {
+            if (act === 'tokens') openTokensModal(id, name);
+            else if (act === 'passwd') {
+              formModal('修改密码 · ' + name, [
+                { id: 'password', label: '新密码（至少 6 位）', type: 'password' },
+              ], '确定', async (v, close) => {
+                await api('/api/users/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: v.password }) });
+                toast('密码已修改（该用户全部 web 会话已失效）', 'ok');
+                close();
+              });
+            } else if (act === 'role') {
+              const role = el.dataset.role === 'admin' ? 'user' : 'admin';
+              await api('/api/users/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role }) });
+              loadAdmin();
+            } else if (act === 'del') {
+              if (!confirm(`确定删除用户 ${name}？（其项目变为无主，令牌与会话全部失效）`)) return;
+              await api('/api/users/' + id, { method: 'DELETE' });
+              loadAdmin(); loadTree();
+            }
+          } catch (e) { toast('操作失败：' + e.message, 'err'); }
+        };
+      });
+      $('u-add').onclick = () => {
+        formModal('新建用户', [
+          { id: 'name', label: '用户名', type: 'text' },
+          { id: 'password', label: '密码（至少 6 位）', type: 'password' },
+          { id: 'role', label: '角色', type: 'select', options: [{ value: 'user', label: '用户' }, { value: 'admin', label: '管理员' }], value: 'user' },
+        ], '创建', async (v, close) => {
+          const created = await api('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(v) });
+          toast(`用户 ${created.user.name} 已创建（角色：${created.user.role === 'admin' ? '管理员' : '用户'}）`, 'ok');
+          close(); loadAdmin();
+        });
+      };
+      $('g-add').onclick = () => {
+        const userOpts = users.filter((u) => u.role !== 'admin').map((u) => ({ value: u.name, label: u.name }));
+        const projOpts = (state.tree?.projects || []).map((p) => ({ value: p.name, label: p.name }));
+        formModal('授权只读', [
+          { id: 'grantee_name', label: '被授权用户', type: 'select', options: userOpts },
+          { id: 'project', label: '项目（开放该项目的只读权限）', type: 'select', options: projOpts },
+        ], '授权', async (v, close) => {
+          await api('/api/grants', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(v) });
+          toast('已授权', 'ok');
+          close(); loadAdmin();
+        });
+      };
+      box.querySelectorAll('[data-revoke]').forEach((el) => {
+        el.onclick = async () => {
+          try {
+            await api('/api/grants/' + el.dataset.revoke, { method: 'DELETE' });
+            toast('已撤销', 'ok'); loadAdmin();
+          } catch (e) { toast('撤销失败：' + e.message, 'err'); }
+        };
+      });
+    } catch (e) { toast('加载失败：' + e.message, 'err'); }
+  } else {
+    $('view-admin').innerHTML = '<div class="empty">仅平台管理员可访问</div>';
+  }
+}
+
+/* generic small form modal */
+let gmSubmit = null;
+function formModal(title, fields, submitLabel, onSubmit) {
+  $('gm-title').textContent = title;
+  const box = $('gm-fields');
+  box.innerHTML = '';
+  for (const f of fields) {
+    const div = document.createElement('div');
+    if (f.type === 'note') {
+      // Static explanation block (destructive operations spell out what dies).
+      div.className = 'field-note';
+      div.textContent = f.text || '';
+      box.appendChild(div);
+      continue;
+    }
+    if (f.type === 'checkbox') {
+      div.className = 'field field-chk';
+      div.innerHTML = `<label><input type="checkbox" id="gm-${f.id}"${f.value ? ' checked' : ''}> <span>${esc(f.label)}</span></label>`;
+      box.appendChild(div);
+      continue;
+    }
+    div.className = 'field';
+    let input;
+    if (f.type === 'select') {
+      input = `<select id="gm-${f.id}">${f.options.map((o) => `<option value="${esc(o.value)}"${f.value === o.value ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</select>`;
+    } else {
+      input = `<input type="${f.type || 'text'}" id="gm-${f.id}" ${f.hint ? 'placeholder="' + esc(f.hint) + '"' : ''}>`;
+    }
+    div.innerHTML = `<label>${esc(f.label)}</label>${input}`;
+    box.appendChild(div);
+  }
+  gmSubmit = onSubmit;
+  $('gm-save').textContent = submitLabel;
+  $('gm-meta').textContent = '';
+  $('modal-generic').hidden = false;
+  const first = box.querySelector('input[type="text"], input[type="password"], input[type="number"], select');
+  if (first) first.focus();
+}
+$('gm-save').onclick = async () => {
+  if (!gmSubmit) return;
+  const values = {};
+  for (const el of $('gm-fields').querySelectorAll('input, select')) {
+    values[el.id.replace('gm-', '')] = el.type === 'checkbox' ? el.checked : el.value;
+  }
+  try { await gmSubmit(values, () => { $('modal-generic').hidden = true; gmSubmit = null; }); }
+  catch (e) { $('gm-meta').textContent = '失败：' + e.message; }
+};
+$('gm-cancel').onclick = () => { $('modal-generic').hidden = true; gmSubmit = null; };
+
+/* tokens modal */
+let tokensUserId = '';
+async function openTokensModal(userId, userName) {
+  tokensUserId = userId;
+  $('tokens-title').textContent = 'MCP 令牌 · ' + userName;
+  await refreshTokens();
+  $('modal-tokens').hidden = false;
+}
+async function refreshTokens() {
+  const { tokens } = await api('/api/users/' + encodeURIComponent(tokensUserId) + '/tokens');
+  const box = $('tokens-body');
+  if (!tokens.length) { box.innerHTML = '<div class="empty" style="padding:20px 0">暂无令牌</div>'; return; }
+  let html = '<table class="list"><thead><tr><th>名称</th><th>创建</th><th>最近使用</th><th>状态</th><th></th></tr></thead><tbody>';
+  for (const t of tokens) {
+    html += `<tr><td class="t">${esc(t.name)}</td>
+      <td style="color:var(--faint);font-size:12px">${fmtDate(t.created_at)}</td>
+      <td style="color:var(--faint);font-size:12px">${t.last_used_at ? fmtDate(t.last_used_at) : '—'}</td>
+      <td>${t.revoked_at ? '<span style="color:var(--red);font-size:12px">已吊销</span>' : '<span class="st-active">有效</span>'}</td>
+      <td>${t.revoked_at ? '' : `<span class="mem-link" style="color:var(--red)" data-revoke-token="${esc(t.id)}">吊销</span>`}</td></tr>`;
+  }
+  box.innerHTML = html + '</tbody></table>';
+  box.querySelectorAll('[data-revoke-token]').forEach((el) => {
+    el.onclick = async () => {
+      try { await api('/api/tokens/' + el.dataset.revokeToken, { method: 'DELETE' }); toast('已吊销', 'ok'); refreshTokens(); }
+      catch (e) { toast('吊销失败：' + e.message, 'err'); }
+    };
+  });
+}
+$('tokens-new').onclick = async () => {
+  formModal('生成新令牌', [{ id: 'name', label: '令牌备注名', type: 'text', hint: '如 win10-dsh' }], '生成', async (v, close) => {
+    const created = await api('/api/users/' + encodeURIComponent(tokensUserId) + '/tokens', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: v.name || 'web' }),
+    });
+    close();
+    refreshTokens();
+    $('token-text').value = created.token;
+    $('modal-token-show').hidden = false;
+  });
+};
+$('tokens-close').onclick = () => { $('modal-tokens').hidden = true; };
+
+/* token show modal */
+$('token-copy').onclick = async () => {
+  try { await navigator.clipboard.writeText($('token-text').value); $('token-copy').textContent = '已复制'; }
+  catch { $('token-copy').textContent = '复制失败（手动选择）'; }
+};
+$('token-close').onclick = () => { $('modal-token-show').hidden = true; $('token-copy').textContent = '复制'; };
+
+/* ---------------- brief preview ---------------- */
+async function openBrief() {
+  const n = state.node;
+  const pid = n.project;
+  if (!pid) { toast('请先在左侧选择一个项目', 'err'); return; }
+  try {
+    const headers = {};
+    if (n.type === 'device') headers['X-HiveMem-Device'] = n.device;
+    if (n.type === 'agent') {
+      if (n.device !== null) headers['X-HiveMem-Device'] = n.device;
+      headers['X-HiveMem-Agent'] = n.agent;
+    }
+    const brief = await api('/api/brief?project=' + encodeURIComponent(pid), {}, { headers });
+    $('brief-title').textContent = '简报预览 · ' + projectName(pid);
+    const ctxDesc = n.type === 'device' ? `设备上下文：${n.device}`
+      : n.type === 'agent' ? `上下文：${n.device === null ? '全设备' : n.device} × ${n.agent}`
+      : '无设备/工具上下文（仅用户级 + 项目级段落）';
+    $('brief-ctx').textContent = ctxDesc;
+    const used = brief.rendered.length;
+    $('brief-budget-i').style.width = Math.min(100, used / brief.budget * 100) + '%';
+    $('brief-budget-t').textContent = `${used} / ${brief.budget} 字`;
+    $('brief-trunc').textContent = brief.truncated ? '⚠ 超预算已截断' : '';
+    renderBrief(brief.rendered, false);
+    $('modal-brief').hidden = false;
+  } catch (e) { toast('加载简报失败：' + e.message, 'err'); }
+}
+
+let briefRaw = false;
+function renderBrief(text, raw) {
+  briefRaw = raw;
+  const box = $('brief-body');
+  if (raw) { box.textContent = text; return; }
+  const lines = text.split('\n');
+  let html = '';
+  for (const line of lines) {
+    if (line.startsWith('## ')) {
+      const h = line.slice(3);
+      let cls = 'bh-proj';
+      if (h.includes('用户级')) cls = 'bh-user';
+      else if (h.includes('本设备')) cls = 'bh-dev';
+      else if (h.includes('本工具')) cls = 'bh-agent';
+      html += `<div class="bh ${cls}" style="margin-top:10px">## ${esc(h)}</div>`;
+    } else if (line.startsWith('- ')) {
+      html += `<div>${esc(line).replace(/\[(mem_[a-z0-9]+)\]/, '<span class="bid">[$1]</span>')}</div>`;
+    } else if (line.trim()) {
+      html += `<div>${esc(line)}</div>`;
+    }
+  }
+  box.innerHTML = html;
+}
+$('brief-raw').onclick = () => { renderBrief($('brief-body').textContent, !briefRaw); $('brief-raw').textContent = briefRaw ? '查看原始文本' : '查看渲染文本'; };
+$('brief-close').onclick = () => { $('modal-brief').hidden = true; };
+
+/* ---------------- project modal ---------------- */
+$('new-project').onclick = () => {
+  formModal('新建项目', [
+    { id: 'name', label: '项目名称', type: 'text', hint: '通常与工作区目录名一致' },
+    { id: 'root_path', label: '项目路径（可留空）', type: 'text', hint: 'agent 在该目录下自动归入此项目' },
+  ], '创建', async (v, close) => {
+    await api('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: v.name, root_path: v.root_path || undefined }) });
+    toast('项目已创建', 'ok');
+    close(); loadTree();
+  });
+};
+
+/* ---------------- project delete ---------------- */
+function openProjectDelete(p) {
+  const memories = p.active_count || 0;
+  const notes = [
+    `永久删除项目「${p.name}」：${memories} 条记忆，连同其设备级/工具级记忆与全部授权关系一并清除，不可恢复（审计日志会留下本次操作记录）。`,
+  ];
+  if (p.root_path && !p.marker_exists) {
+    notes.push(
+      `目录标记 .hivemem/project.json 不在 hub 可见范围内：若客户端目录里仍有它，下次以该路径引用会重新注册同名项目，需要时请在客户端手动删除该文件。`,
+    );
+  }
+  const fields = [{ id: '_note', type: 'note', text: notes.join(' ') }];
+  if (memories > 0) fields.push({ id: 'confirm', type: 'text', label: `输入项目名确认：${p.name}` });
+  if (p.marker_exists) {
+    fields.push({
+      id: 'remove_marker', type: 'checkbox', value: false,
+      label: '同时删除目录里的 .hivemem/project.json（否则下次在该目录下使用时会重新注册同名项目）',
+    });
+  }
+  formModal('删除项目 · ' + p.name, fields, '永久删除', async (v, close) => {
+    const query = new URLSearchParams();
+    if (v.confirm) query.set('confirm', v.confirm);
+    if (v.remove_marker) query.set('remove_marker', '1');
+    const qs = query.toString();
+    const res = await api('/api/projects/' + encodeURIComponent(p.id) + (qs ? '?' + qs : ''), { method: 'DELETE' });
+    close();
+    delete state.expanded[p.id];
+    await loadTree();
+    loadReviewCount();
+    // The deleted project may be the one the main pane is filtered on.
+    if (state.node && state.node.project === p.id) setNode({ type: 'all' });
+    else if (state.view === 'memories') loadMemories();
+    else if (state.view === 'overview' || state.view === 'stats') setView(state.view);
+    toast(
+      `已删除项目「${res.name}」及 ${res.memories} 条记忆${res.marker_removed ? '，目录标记已移除' : ''}`,
+      'ok',
+    );
+  });
+}
+
+/* ---------------- wiring ---------------- */
+let searchTimer;
+$('search').addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    state.query = $('search').value.trim();
+    if (state.query && state.view !== 'memories') setNode({ type: 'all' });
+    else if (state.view === 'memories') { state.offset = 0; loadMemories(); }
+  }, 250);
+});
+$('kind-filter').onchange = () => { state.kind = $('kind-filter').value; if (state.view === 'memories') { state.offset = 0; loadMemories(); } };
+$('status-filter').onchange = () => { state.status = $('status-filter').value; if (state.view === 'memories') { state.offset = 0; loadMemories(); } };
+$('layout-toggle').onchange = () => { state.layout = $('layout-toggle').value; if (state.view === 'memories') renderMemories(); };
+$('new-memory').onclick = () => openEditor(null);
+$('burger').onclick = () => $('sidebar').classList.toggle('open');
+
+$('nav-overview').onclick = () => setView('overview');
+$('nav-all').onclick = () => setNode({ type: 'all' });
+$('nav-user').onclick = () => setNode({ type: 'user' });
+$('nav-review').onclick = () => setView('review');
+$('nav-stats').onclick = () => setView('stats');
+$('nav-audit').onclick = () => setView('audit');
+$('nav-admin').onclick = () => setView('admin');
+
+$('login-submit').onclick = doLogin;
+$('login-pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+$('login-token').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+
+$('dw-close').onclick = closeDetail;
+$('ed-save').onclick = saveEditor;
+$('ed-cancel').onclick = () => { $('modal-editor').hidden = true; };
+$('ed-delete').onclick = async () => {
+  if (!state.editing || !confirm('确定永久删除这条记忆？（归档可保留历史）')) return;
+  try {
+    await api('/api/memories/' + encodeURIComponent(state.editing.id), { method: 'DELETE' });
+    $('modal-editor').hidden = true;
+    toast('已删除', 'ok');
+    closeDetail(); loadTree(); loadReviewCount();
+    if (state.view === 'memories') loadMemories();
+  } catch (e) { toast('删除失败：' + e.message, 'err'); }
+};
+for (const opt of document.querySelectorAll('#ed-scope-grid .scope-opt')) {
+  opt.onclick = () => setEditorScope(opt.dataset.scope);
+}
+$('modal-editor').addEventListener('click', (e) => { if (e.target === $('modal-editor')) $('modal-editor').hidden = true; });
+$('modal-generic').addEventListener('click', (e) => { if (e.target === $('modal-generic')) { $('modal-generic').hidden = true; gmSubmit = null; } });
+$('modal-brief').addEventListener('click', (e) => { if (e.target === $('modal-brief')) $('modal-brief').hidden = true; });
+$('modal-tokens').addEventListener('click', (e) => { if (e.target === $('modal-tokens')) $('modal-tokens').hidden = true; });
+$('modal-token-show').addEventListener('click', (e) => { if (e.target === $('modal-token-show')) $('modal-token-show').hidden = true; });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeDetail();
+    for (const id of ['modal-editor', 'modal-generic', 'modal-brief', 'modal-tokens', 'modal-token-show']) $(id).hidden = true;
+    gmSubmit = null;
+  }
+});
+
+(async () => {
+  try {
+    if (!(await initAuth())) return;
+    await loadAll();
+  } catch (e) {
+    // initAuth succeeded but data load hit 401 → legacy token login shown by api()
+    if (e.message !== 'unauthorized' && e.message !== '请先登录') toast('初始化失败：' + e.message, 'err');
+  }
+})();
+</script>
+</body>
+</html>

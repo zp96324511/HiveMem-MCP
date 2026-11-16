@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.*
+scripts/start-hub.cmd
+hub*.log
+*.tgz
+*.db
+*.db-wal
+*.db-shm
+# 注意：.hivemem/project.json（项目身份 marker）应随仓库提交——
+# 它让 clone 到任何机器/路径都解析到同一项目。想保持每 clone 独立身份再取消注释下面这行。
+# .hivemem/

@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # typecheck + server tests + plugin tests
+      - name: Check
+        run: npm run check
+
+      - name: Pack the plugin
+        working-directory: dsh-plugin
+        run: npm pack --json > ../pack-plugin.json
+
+      # A file missing from `files` only fails after a user installs the tarball,
+      # so the listing is asserted here instead.
+      - name: Verify the plugin tarball
+        run: |
+          TARBALL=$(node -e "console.log(require('./pack-plugin.json')[0].filename)")
+          echo "tarball: $TARBALL"
+          tar -tzf "dsh-plugin/$TARBALL" | tee listing.txt
+          for file in package.json lib/index.js lib/core.js cordis.patch.yml README.md; do
+            grep -qx "package/$file" listing.txt || { echo "missing package/$file"; exit 1; }
+          done
+          node --check dsh-plugin/lib/index.js
+          node --check dsh-plugin/lib/core.js
+
+      # Install it the way a consumer does and read what actually lands.
+      - name: Install the plugin into a scratch directory
+        run: |
+          TARBALL=$(node -e "console.log(require('./pack-plugin.json')[0].filename)")
+          SCRATCH="$RUNNER_TEMP/consumer"
+          mkdir -p "$SCRATCH"
+          cd "$SCRATCH"
+          npm init -y > /dev/null
+          npm install --no-audit --no-fund "$GITHUB_WORKSPACE/dsh-plugin/$TARBALL" > /dev/null
+          node -e '
+            const { readFileSync } = require("node:fs");
+            const pkg = require("./node_modules/hivemem-dsh/package.json");
+            for (const file of ["lib/index.js", "lib/core.js", "cordis.patch.yml"]) {
+              readFileSync(`./node_modules/hivemem-dsh/${file}`);
+            }
+            console.log(`installed ${pkg.name}@${pkg.version}`);
+          '
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hivemem-dsh
+          path: dsh-plugin/*.tgz
+          if-no-files-found: error

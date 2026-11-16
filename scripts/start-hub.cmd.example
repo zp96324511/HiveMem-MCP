@@ -1,0 +1,8 @@
+@echo off
+rem HiveMem hub 启动脚本（本地常驻记忆中枢）
+rem 复制为 start-hub.cmd 并填入自己的嵌入服务配置；start-hub.cmd 已被 gitignore。
+set HIVEMEM_EMBEDDING_URL=http://your-embedding-host:port/v1/embeddings
+set HIVEMEM_EMBEDDING_MODEL=bge-large
+set HIVEMEM_EMBEDDING_KEY=your-key
+cd /d "%~dp0.."
+node dist\index.js hub --port 7660

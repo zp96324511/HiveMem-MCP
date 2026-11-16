@@ -1,0 +1,12 @@
+node_modules
+dist
+*.log
+hub*.log
+hub-out-*.log
+scripts/start-hub.cmd
+.hivemem
+*.db
+*.db-wal
+*.db-shm
+test
+DEPLOY-1PANEL.md
