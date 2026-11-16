@@ -107,11 +107,13 @@ test('resolveProject 未知引用报错并列出已注册项目', () => {
   }
 });
 
-test('normalizeKey 在 Windows 上大小写不敏感且分隔符归一', () => {
+test('normalizeKey 分隔符归一，Windows 上大小写不敏感', () => {
   const a = normalizeKey(process.cwd());
-  const b = normalizeKey(process.cwd().toUpperCase());
-  assert.equal(a, b);
   assert.ok(!a.includes('\\'));
+  // POSIX 路径大小写敏感，只有 Windows 才把盘符/目录名统一成小写。
+  if (process.platform === 'win32') {
+    assert.equal(a, normalizeKey(process.cwd().toUpperCase()));
+  }
 });
 
 test('同名目录注册自动加后缀，项目名引用保持无歧义', () => {
