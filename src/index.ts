@@ -16,7 +16,7 @@ import { runDoctor, setupDsh } from './setup.js';
 import { bootstrapBrief, embeddingStats, projectStats, sweepExpired } from './store.js';
 import { reindexEmbeddings, requireEmbedder } from './vec.js';
 
-const HELP = `hivemem 0.4.4 — 项目级多 agent 共享记忆中枢
+const HELP = `hivemem 0.5.0 — 项目级多 agent 共享记忆中枢
 
 命令:
   serve              以 stdio MCP server 运行（默认；由 agent 客户端拉起）

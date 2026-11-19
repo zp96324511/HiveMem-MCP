@@ -143,3 +143,168 @@ test('topic_key 修订与内容更新后重新嵌入（向量不陈旧）', asyn
     f.cleanup();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Admission gate + RRF fusion (retrieval precision regression)
+// ---------------------------------------------------------------------------
+
+/** 4 维正交主题嵌入器；第四维是"任何记忆都不匹配"的兜底方向。 */
+function axisEmbedder(modelName: string): Embedder {
+  return {
+    modelName,
+    dimension: 0,
+    async embed(texts: string[]) {
+      this.dimension = 4;
+      return texts.map((text) => {
+        if (/数据库|PostgreSQL/.test(text)) return [1, 0, 0, 0];
+        if (/部署|Docker/.test(text)) return [0, 1, 0, 0];
+        if (/网关/.test(text)) return [0, 0, 1, 0];
+        return [0, 0, 0, 1];
+      });
+    },
+  };
+}
+
+/** 2 维定向嵌入器：按标记词返回指定余弦，用于排序倒挂回归。 */
+function markerEmbedder(modelName: string): Embedder {
+  return {
+    modelName,
+    dimension: 0,
+    async embed(texts: string[]) {
+      this.dimension = 2;
+      return texts.map((text) => {
+        if (text.includes('QUERYX')) return [1, 0];
+        if (text.includes('LOWREL')) return [0.82, 0.5724]; // cos = 0.82
+        if (text.includes('HIGHREL')) return [0.88, 0.475]; // cos = 0.88
+        return [0, 1];
+      });
+    },
+  };
+}
+
+/** Run a case with explicit gate settings, restoring the environment after. */
+async function withGate<T>(min: string, margin: string, fn: () => Promise<T>): Promise<T> {
+  const prevMin = process.env.HIVEMEM_SEMANTIC_MIN_SCORE;
+  const prevMargin = process.env.HIVEMEM_SEMANTIC_MARGIN;
+  process.env.HIVEMEM_SEMANTIC_MIN_SCORE = min;
+  process.env.HIVEMEM_SEMANTIC_MARGIN = margin;
+  try {
+    return await fn();
+  } finally {
+    if (prevMin === undefined) delete process.env.HIVEMEM_SEMANTIC_MIN_SCORE;
+    else process.env.HIVEMEM_SEMANTIC_MIN_SCORE = prevMin;
+    if (prevMargin === undefined) delete process.env.HIVEMEM_SEMANTIC_MARGIN;
+    else process.env.HIVEMEM_SEMANTIC_MARGIN = prevMargin;
+  }
+}
+
+test('语义准入门槛：无关 query 不再返回全库，命中带 relevance/matched/scanned', async () => {
+  const f = seeded();
+  try {
+    await withGate('0.4', '0.12', async () => {
+      const embedder = axisEmbedder('gate-a');
+      const m = store.writeMemory(f.db, {
+        projectId: f.project.id, title: '存储选型', content: '最终采用 PostgreSQL。', kind: 'decision',
+      });
+      await vec.embedMemoryBestEffort(f.db, embedder, m);
+
+      const hit = await vec.hybridSearch(f.db, embedder, { projectId: f.project.id, query: '数据库', limit: 10 });
+      assert.equal(hit.mode, 'hybrid');
+      assert.equal(hit.scanned, 1);
+      assert.equal(hit.total, 1);
+      assert.equal(hit.hits.length, 1);
+      assert.equal(hit.hits[0].id, m.id);
+      assert.equal(hit.hits[0].matched, 'semantic');
+      assert.equal(hit.hits[0].relevance, 1);
+
+      // 与库内任何向量都正交的 query：旧实现会返回全库（total = 1）
+      const miss = await vec.hybridSearch(f.db, embedder, { projectId: f.project.id, query: '天气预报', limit: 10 });
+      assert.equal(miss.total, 0);
+      assert.deepEqual(miss.hits, []);
+      assert.equal(miss.scanned, 1);
+    });
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('RRF 排序：元数据不能再把低相关置顶记忆顶到高相关记忆前面', async () => {
+  const f = seeded();
+  try {
+    await withGate('0.4', '0.12', async () => {
+      const embedder = markerEmbedder('rrf-a');
+      // 低相关但置顶 + importance=1（旧公式靠 0.30 元数据底盘排第一）
+      const low = store.writeMemory(f.db, {
+        projectId: f.project.id, title: 'LOWREL 部署记录', content: 'x', kind: 'decision',
+        pinned: true, importance: 1,
+      });
+      // 高相关但普通
+      const high = store.writeMemory(f.db, {
+        projectId: f.project.id, title: 'HIGHREL 选型', content: 'x', kind: 'decision', importance: 0.1,
+      });
+      await vec.embedMemoryBestEffort(f.db, embedder, low);
+      await vec.embedMemoryBestEffort(f.db, embedder, high);
+
+      const r = await vec.hybridSearch(f.db, embedder, { projectId: f.project.id, query: 'QUERYX', limit: 10 });
+      assert.equal(r.total, 2);
+      assert.deepEqual(r.hits.map((h) => h.id), [high.id, low.id]);
+      assert.ok((r.hits[0].semanticScore ?? 0) > (r.hits[1].semanticScore ?? 0));
+      assert.ok(r.hits[0].score > r.hits[1].score, 'ranking must follow relevance, not pin state');
+    });
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('混合检索分页只应用一次 offset', async () => {
+  const f = seeded();
+  try {
+    await withGate('0.4', '0.12', async () => {
+      const embedder = axisEmbedder('page-a');
+      for (let i = 0; i < 6; i++) {
+        const m = store.writeMemory(f.db, {
+          projectId: f.project.id, title: `部署手册 ${i}`, content: 'Docker 部署步骤。', kind: 'procedure',
+        });
+        await vec.embedMemoryBestEffort(f.db, embedder, m);
+      }
+      const full = await vec.hybridSearch(f.db, embedder, { projectId: f.project.id, query: '部署手册', limit: 10 });
+      assert.equal(full.total, 6);
+      const page = await vec.hybridSearch(f.db, embedder, {
+        projectId: f.project.id, query: '部署手册', limit: 2, offset: 2,
+      });
+      assert.deepEqual(page.hits.map((h) => h.id), full.hits.slice(2, 4).map((h) => h.id));
+      assert.equal(new Set(page.hits.map((h) => h.id)).size, 2);
+    });
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('命中字段：纯词法命中 matched=lexical、relevance=null', async () => {
+  const f = seeded();
+  try {
+    await withGate('0.4', '0.12', async () => {
+      const embedder = axisEmbedder('fields-a');
+      const embedded = store.writeMemory(f.db, {
+        projectId: f.project.id, title: '存储选型', content: '最终采用 PostgreSQL。', kind: 'decision',
+      });
+      await vec.embedMemoryBestEffort(f.db, embedder, embedded);
+      // 没有向量（例如嵌入失败/未建索引），只能走词法
+      const lexicalOnly = store.writeMemory(f.db, {
+        projectId: f.project.id, title: '数据库备份策略', content: '每日快照。', kind: 'procedure',
+      });
+
+      const r = await vec.hybridSearch(f.db, embedder, { projectId: f.project.id, query: '数据库备份', limit: 10 });
+      const lex = r.hits.find((h) => h.id === lexicalOnly.id);
+      const sem = r.hits.find((h) => h.id === embedded.id);
+      assert.ok(lex && sem, 'both the lexical-only and the semantic hit must be returned');
+      assert.equal(lex!.matched, 'lexical');
+      assert.equal(lex!.relevance, null);
+      assert.equal(lex!.semanticScore, null);
+      assert.equal(sem!.matched, 'semantic');
+      assert.ok((sem!.relevance ?? 0) > 0.9);
+    });
+  } finally {
+    f.cleanup();
+  }
+});

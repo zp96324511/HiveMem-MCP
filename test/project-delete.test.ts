@@ -136,6 +136,67 @@ test('hub 端到端：删除非空项目需 confirm=项目名（大小写不敏�
   }
 });
 
+test('hub 端到端：只剩归档记忆的项目同样要求 confirm（树里 active_count=0，级联却非空）', async () => {
+  const f = fixture();
+  const server = await startHub({ db: f.db, port: 0 });
+  try {
+    const port = (server.address() as { port: number }).port;
+    const base = `http://127.0.0.1:${port}`;
+    const json = async (p: string, init?: RequestInit) => {
+      const res = await fetch(base + p, init);
+      return { status: res.status, body: (await res.json().catch(() => ({}))) as Record<string, any> };
+    };
+    const post = (p: string, body: unknown, headers: Record<string, string> = {}) =>
+      json(p, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
+
+    const proj = await post('/api/projects', { name: 'history-only' });
+    const id = proj.body.project.id as string;
+    const mem = await post('/api/memories', { project: 'history-only', title: 'old note', content: 'x', kind: 'fact' });
+    store.updateMemory(f.db, id, mem.body.memory.id, { status: 'archived' });
+
+    // The panel's tree count is active-only: it shows 0 for this project.
+    const node = (await json('/api/tree')).body.projects.find((p: any) => p.id === id);
+    assert.equal(node.active_count, 0, '树里计数为 0（归档不计数）');
+
+    // But the hub's cascade guard counts every status.
+    const refused = await json(`/api/projects/${id}`, { method: 'DELETE' });
+    assert.equal(refused.status, 400);
+    assert.equal(refused.body.confirm_required, 'history-only');
+    assert.equal(refused.body.memories, 1, '服务端按全部状态计数');
+
+    const ok = await json(`/api/projects/${id}?confirm=history-only`, { method: 'DELETE' });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.memories, 1);
+  } finally {
+    server.close();
+    server.closeAllConnections?.();
+    f.cleanup();
+  }
+});
+
+test('面板：删除弹窗无条件渲染项目名输入框（旧版按 active_count 门控 → 无输入可填却必被 400 拒绝）', async () => {
+  const f = fixture();
+  const server = await startHub({ db: f.db, port: 0 });
+  try {
+    const port = (server.address() as { port: number }).port;
+    const res = await fetch(`http://127.0.0.1:${port}/`);
+    assert.equal(res.status, 200);
+    const html = await res.text();
+    assert.match(html, /openProjectDelete/);
+    assert.match(html, /id: 'confirm'/, '确认输入框存在');
+    assert.doesNotMatch(
+      html,
+      /if \(memories > 0\) fields\.push\(\{ id: 'confirm'/,
+      '输入框不得按本地 active 计数门控',
+    );
+    assert.match(html, /confirm_required/, '400 的结构化响应被用于弹窗内提示');
+  } finally {
+    server.close();
+    server.closeAllConnections?.();
+    f.cleanup();
+  }
+});
+
 test('hub 端到端：仅所有者/管理员可删、@user 拒绝删除、remove_marker 移除目录标记', async () => {
   const f = fixture();
   const server = await startHub({ db: f.db, port: 0 });

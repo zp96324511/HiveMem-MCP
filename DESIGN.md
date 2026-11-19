@@ -89,12 +89,20 @@ audit_log(append-only, 无外键——必须能在被记录对象删除后存活
 2. **query < 3 字符**（如两字中文词）→ LIKE 子串降级（标题命中优先于正文）
 3. **无 query** → 浏览模式（pinned 优先，按更新时间倒序）
 
-候选集在应用层混合打分：
+纯词法模式的候选集在应用层打分：
 
 ```
 score = 0.45·文本排名 + 0.20·新近度(e^(-age/30d)) + 0.15·重要性 + 0.10·置顶 + 0.10·kind权重
 kind权重: decision 1.0 > fact/preference 0.8 > procedure 0.7 > snippet 0.5 > episodic 0.4
 ```
+
+配置嵌入模型后走混合模式，分三段：
+
+1. **语义准入**：`sem >= max(HIVEMEM_SEMANTIC_MIN_SCORE, semTop - HIVEMEM_SEMANTIC_MARGIN)`。旧实现用 `cos > 0`，bge 系中文无关文本余弦仍在 0.3–0.45，等于全库入选（线上每个 query 的 `total` 都等于库大小，置顶记忆永远第一）。纯词法命中不受门槛限制。
+2. **RRF 融合**：`score = 5·(1/(10+rank_sem) + 1/(10+rank_lex))`（0..1，本次查询内可比）。用名次而非原始余弦，避免不同模型余弦尺度不同；也修掉了"元数据权重 0.30 > 语义可见差 0.07"导致的排序倒挂。
+3. **元数据 tie-break**：新近度/重要性/置顶/类型只在融合分相同时决定先后，不再进入相关性分数。
+
+命中项暴露 `score`（融合排序）、`relevance`（语义余弦原值，纯词法为 null）、`matched`（semantic/lexical/both）；`total` 为过门槛后的命中数，`scanned` 为参与比较的向量数。分页 offset 只在融合后应用一次。
 
 FTS5 用 external content 表 + 触发器同步，索引与数据同库同事务。trigram 对 CJK 按码点切分，无需分词库。
 
@@ -130,7 +138,7 @@ REST API（`/api/*`）同时服务 UI 与外部脚本：projects / memories CRUD
 
 ## 10. P2 设计补充（已实现）
 
-- **语义层（P2a）**：node:sqlite 不能加载扩展 → 不用 sqlite-vec，向量以 Float32 BLOB 存储、JS 暴力余弦（个人库规模毫秒级）。嵌入 provider 为任意 OpenAI 兼容端点（`HIVEMEM_EMBEDDING_URL/MODEL/KEY`）。**模型身份三态校验**（MemPalace RFC 001）：unknown 首写记录 / match 放行 / mismatch 拒写索引 + 检索降级词法并在 `warnings` 中给出 `repair-embeddings` 提示——永不静默降质。混合打分：`0.35·语义 + 0.35·词法文本 + 0.30·(新近度+重要性+置顶+类型)`。嵌入失败不影响记忆写入（向量是派生态）。
+- **语义层（P2a）**：node:sqlite 不能加载扩展 → 不用 sqlite-vec，向量以 Float32 BLOB 存储、JS 暴力余弦（个人库规模毫秒级）。嵌入 provider 为任意 OpenAI 兼容端点（`HIVEMEM_EMBEDDING_URL/MODEL/KEY`）。**模型身份三态校验**（MemPalace RFC 001）：unknown 首写记录 / match 放行 / mismatch 拒写索引 + 检索降级词法并在 `warnings` 中给出 `repair-embeddings` 提示——永不静默降质。混合检索（检索精度重构）：语义准入门槛（绝对 + 相对）+ RRF 融合 + 元数据 tie-break，详见 §6。嵌入失败不影响记忆写入（向量是派生态）。
 - **生命周期（P2b 确定性部分）**：`expires_at`/`ttl_days` 写入即接线；active 检索与 bootstrap 简报过滤过期；`gc`/hub 启动把过期记忆归档（审计 'expire'，永不删除）。`supersedes` 写入时自动把旧记忆标记 superseded（审计 'supersede'），`memory_read` 返回完整演变链（旧→新）。`last_accessed_at` 在 read 时更新（不影响 updated_at）。
 - **导入（P2c）**：`import-claude` 把 Claude Code JSONL 会话变成 episodic 记忆：标题取首条真实用户请求，正文为请求摘要+最终回复，`session_id`=文件名 UUID 保证幂等，原始时间戳保留（新近度打分不失真），默认 TTL 90 天。
 - **认证（P2d）**：`hivemem token` 生成 32 字节 hex；常量时间比较；Web UI 免认证加载、401 时提示令牌。

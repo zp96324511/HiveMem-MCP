@@ -116,7 +116,7 @@ function fail(error: unknown) {
 
 export function createMcpServer(ctx: McpContext): McpServer {
   const server = new McpServer(
-    { name: 'hivemem', version: '0.4.4' },
+    { name: 'hivemem', version: '0.5.0' },
     { instructions: SERVER_INSTRUCTIONS },
   );
 
@@ -412,8 +412,11 @@ export function createMcpServer(ctx: McpContext): McpServer {
         });
         const candidates = new Map<string, { id: string; title: string; score: number }>();
         for (const hit of similar.hits) {
-          if (hit.score >= 0.4 && !candidates.has(hit.id)) {
-            candidates.set(hit.id, { id: hit.id, title: hit.title, score: hit.score });
+          // Lexical evidence only: the blended `score` mixes recency/importance
+          // into the number, so a 0.4 cutoff used to flag merely *recent*
+          // memories as duplicates. textScore is the pure text-rank component.
+          if (hit.textScore >= 0.34 && !candidates.has(hit.id)) {
+            candidates.set(hit.id, { id: hit.id, title: hit.title, score: Math.round(hit.textScore * 1000) / 1000 });
           }
         }
         const newTitle = args.title.trim();
@@ -475,7 +478,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
     'memory_search',
     {
       description:
-        '检索记忆（词法全文 + 可选语义向量混合排序）。query 可省略以浏览最近记忆。在 project 指定的项目内检索（HTTP 模式必须传 project），并合并用户级记忆，命中带 scope 标注。',
+        '检索记忆（词法全文 + 可选语义向量混合排序）。query 可省略以浏览最近记忆。在 project 指定的项目内检索（HTTP 模式必须传 project），并合并用户级记忆，命中带 scope 标注。命中字段：score 是本次查询内的融合排序分（0..1，跨查询不可比）；relevance 是绝对相关性（语义余弦原值，纯词法命中为 null）；matched 标明命中来源（semantic/lexical/both）；semanticScore 保留为兼容字段。total 是过相关性门槛后的命中数，scanned 是参与语义扫描的向量数。',
       inputSchema: {
         project: projectSchema,
         query: z.string().optional().describe('检索词；省略则按时间浏览'),

@@ -1,6 +1,6 @@
 {
   "name": "hivemem-mcp",
-  "version": "0.4.4",
+  "version": "0.5.0",
   "description": "Project-scoped shared memory hub for AI agents: MCP server (stdio + HTTP) with a built-in web management platform. Zero native dependencies.",
   "type": "module",
   "license": "MIT",

@@ -1,6 +1,6 @@
 {
   "name": "hivemem-dsh",
-  "version": "0.4.4",
+  "version": "0.5.0",
   "description": "Inject the HiveMem project brief into the DSH prompt before each model step, so recall does not depend on the agent remembering to call a tool.",
   "type": "module",
   "main": "lib/index.js",

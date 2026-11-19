@@ -160,7 +160,7 @@ dsh plugin --profile web add https://github.com/zp96324511/HiveMem-MCP/releases/
 # 3) 重启 dsh web 后验证：会话里应出现「## HiveMem 项目简报（自动注入）」段
 ```
 
-`dsh plugin add` 会自己把包追加进 `dsh.profile.bundles`，不需要手写 `insert`。升级时用**带版本号**的 URL（`releases/download/v0.4.4/hivemem-dsh.tgz`）重新 add；`latest/download` 的 spec 不变，pnpm 会跳过解析、装不到新版本。
+`dsh plugin add` 会自己把包追加进 `dsh.profile.bundles`，不需要手写 `insert`。升级时用**带版本号**的 URL（`releases/download/v0.5.0/hivemem-dsh.tgz`）重新 add；`latest/download` 的 spec 不变，pnpm 会跳过解析、装不到新版本。
 
 - **只读**：插件只调 `GET /api/brief`，从不写库——记忆的产生仍然只走 agent 策展路径
 - **不重复取**：注入的段落自带一句「简报已经在这里了，不必再调用 `memory_bootstrap`」，MCP 的 `SERVER_INSTRUCTIONS` 与工具描述也改成了条件式（先看有没有注入段，有就不调），避免模型在同一步里白拿第二份
@@ -236,7 +236,11 @@ HIVEMEM_EMBEDDING_KEY=<your-key> \
 hivemem hub
 ```
 
-- 检索变为混合模式：`0.35·语义 + 0.35·词法 + 0.30·新近度/重要性/置顶/类型`
+- 检索变为混合模式：**先语义准入，再排名融合（RRF）**，元数据只做同分 tie-break
+  - 语义准入：绝对余弦下限 `HIVEMEM_SEMANTIC_MIN_SCORE`（默认 `0.40`，按模型族标定）+ 相对本次最高分截断 `HIVEMEM_SEMANTIC_MARGIN`（默认 `0.12`）。低于门槛的向量不进入结果；纯词法命中不受此限
+  - 融合分 `score = 5·(1/(10+语义名次) + 1/(10+词法名次))`：两路都第一 = 1.0，单路第一 = 0.5；`score` 只在本次查询内可比
+  - 命中字段：`relevance` 是绝对相关性（语义余弦原值，纯词法命中为 `null`）；`matched` 标明 `semantic` / `lexical` / `both`；`total` 是过门槛后的命中数，`scanned` 是参与比较的向量数
+  - **换嵌入模型后需重新标定门槛**（不同模型余弦分布差异很大：bge 系无关文本常在 0.3–0.45，OpenAI 系常在 0.0–0.2），用 `hivemem doctor` 或抽样查看分布后调整
 - **换模型不会静默降质**：库内记录嵌入模型身份，不一致时自动降级为词法检索并在结果中给出警告；`hivemem repair-embeddings` 重建索引后恢复
 - **短上下文模型安全**：送入嵌入的文本默认截断到 480 字符（bge 系列 512 token 上限的安全值，标题在前保主旨）；长上下文模型可用 `HIVEMEM_EMBEDDING_MAX_CHARS=6000` 放宽
 - **预算模式**：`HIVEMEM_SEMANTIC_MODE=fallback` 时只在词法检索无命中才调用嵌入端点（按量计费/不稳定端点省钱）

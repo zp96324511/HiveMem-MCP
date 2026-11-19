@@ -143,3 +143,22 @@
 - [x] J2 工具接线：`memory_read` / `memory_update` / `memory_archive` / `memory_review`(mark_reviewed) 先解析，再以行的真实 `project_id` 落库——SQL `WHERE project_id = ?` 守卫与审计不会被工作区 id 污染；变更后同时通知工作区与 `@user` 两个简报
 - [x] J3 测试：MCP 用例覆盖 workspace 视图 read/update/archive 用户级记忆 + 项目记忆仍隔离；store 用例覆盖跨用户 `@user` 仍拒绝；`npm test` 100/100、`check:plugin` 15/15、typecheck/build 干净
 - [x] J4 线上部署 v0.4.4（2026-11-13 20:11 服务器本机时间）：构建上下文就地改 5 个文件（store.ts / mcp.ts / index.ts / package.json / package-lock.json），LF 归一化后与本地 sha256 全等；`docker build -t hivemem:0.4.4`；19288 全新库冒烟——`serverInfo.version=0.4.4`、用户级记忆在 workspace 视图 read OK / update v2 / archive archived、项目记忆跨项目仍 `MEMORY_NOT_FOUND`；19289 生产库快照冒烟——多用户模式、无令牌 401、库打开无迁移错误；备份 `docker-compose.yml.bak-20261113-201159-pre044` + `data/backup/hivemem-pre-044-20261113-201135.db`；切 tag 后 healthy / Restarts=0；线上 MCP 实测 `memory_read(project="HiveMem-MCP", id="mem_67d11830b56e4962a359")` 返回 `scope=user`，公网 200、无令牌 401
+
+## Phase K（v0.4.5）：删除弹窗的确认框不再被本地计数门控
+
+来源：用户线上反馈「删除项目时提示 失败：删除非空项目需确认：请传入 confirm=（项目名），但是没有输入的地方」。根因是**两套计数语义不一致**：侧栏树只统计 `status='active'`（`subquery ... WHERE m.status = 'active'` 得 `active_count`），面板据此决定是否渲染确认输入框；而 `DELETE /api/projects/:id` 的守卫统计 `COUNT(*) FROM memories WHERE project_id = ?`，包含归档与已被取代的行。项目若只剩历史记录（生产库里有 `deepseek-harness` / `huiming` 两条这样的项目），树里显示 0 → 不渲染输入框 → 服务端仍然 400 → 弹窗里只有一句 API 味报错，无处可填，形成死胡同。
+
+- [x] K1 面板：`openProjectDelete` 无条件渲染 `confirm` 输入框（占位提示「项目为空可留空」），说明文案改为「当前 N 条活跃，已归档 / 已被取代的历史记录也一并删除」；`api()` 在抛错时附带 `status` 与解析后的 `body`（向后兼容）
+- [x] K2 兜底：提交时若收到 400 + `confirm_required`，弹窗保持打开、清空并聚焦输入框，报错改用服务端真实条数「该项目共有 N 条记忆（含已归档 / 已被取代），请输入项目名「name」确认」
+- [x] K3 测试：新增「只剩归档记忆的项目仍要求 confirm（树里 active_count=0）」端到端用例；新增面板 HTML 断言——确认框必须存在、且不得再被 `memories > 0` 门控；`npm test` 全绿、typecheck/build 干净
+- [x] K4 线上部署 v0.4.5（2026-11-16）：只改 `web/index.html` + 版本号四处（package.json / package-lock ×2 / mcp.ts / index.ts）；构建后在临时端口用带归档记忆的临时库验证弹窗有输入框、错名报新提示、正确名删除成功；切 tag 后 healthy、公网 `serverInfo.version=0.4.5`
+## Phase L（v0.5.0）：检索精度重构（P0+P1）
+
+来源：用户反馈「向量检索会出现精确度问题，看是否需要调高检索得分阈值」。只读诊断 + 线上 10 条 query 回放后确认**阈值不是解法**：`semanticScore > 0` 等于全库入选（任何 query 的 `total` 恒为 37），旧公式里元数据占 0.30 预算能压过语义 0.45 的正确项，且 `total` 并非命中数。
+
+- [x] L1 语义准入门槛：绝对下限 `HIVEMEM_SEMANTIC_MIN_SCORE`（默认 0.40）+ 相对截断 `HIVEMEM_SEMANTIC_MARGIN`（默认 0.12），低于 `max(min, top − margin)` 的语义候选剔除；词法命中不受影响（精确关键词召回保持）
+- [x] L2 融合改 RRF：`fused = min(1, 5 × (1/(10+rank_sem) + 1/(10+rank_lex)))`，排名只在各自通道内比较；元数据（置顶/重要度/新近度/kind）退为 tie-break，消除「语义 0.453 但无关」压过 0.617 正确项的倒挂
+- [x] L3 返回语义修正：`score`=融合分（仅供 tie-break，不跨 query 比较）、`relevance`=原始余弦、`matched`=semantic|lexical|both|none、`total`=过门槛命中数、`scanned`=扫描数；`memory_similar` 查重改用 `textScore >= 0.34`；顺手修分页双重偏移与逐条 `IN`+`getMemory` 的 N+1
+- [x] L4 测试：新增 4 例（准入门槛剔除无关 / RRF 不倒挂 / 分页只偏移一次 / 纯词法命中标记）；`npm test` 106/106、`check:plugin` 15/15、typecheck 与 build 干净
+- [x] L5 线上回放（改造前数据）：无关 query 37→0（天气/量子力学/今天吃什么）、乐观并发 37→1、1Panel 反代 37→1（命中正确项，不再倒挂）、向量检索 37→3、简报 37→11
+- [x] L6 线上部署 v0.5.0（2026-11-19 15:43 服务器本机时间）：6 个文件 scp 到 `/opt/hivemem-build`（sha256 6/6 一致，上下文备份 `/opt/hivemem-build.bak-20261119-154057`）→ `docker build -t hivemem:0.5.0` → 生产库快照 `data/backup/hivemem-pre-050-20261119-154142.db` 在 19295 冒烟（HTTP 200 / 多用户 / `serverInfo=0.5.0` / 9 工具）→ compose 备份 `docker-compose.yml.bak-20261119-154233-pre050` → 切 tag 后 healthy、Restarts=0；本地与公网均 200、无令牌 401。线上 MCP 复验：天气/量子力学/今天吃什么 `total=0 scanned=37`、乐观并发 `total=1 matched=lexical`、1Panel 反代 `total=1`（正确项 `relevance=0.617`）、向量检索 `total=2`、简报 `total=11`、docker 部署 `total=16`。回滚：镜像回 `hivemem:0.4.5`（同 schema v6）即可

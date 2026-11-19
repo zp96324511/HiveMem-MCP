@@ -646,7 +646,14 @@ async function api(path, init = {}, opts = {}) {
     showLogin('token'); throw new Error('unauthorized');
   }
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || res.statusText);
+  if (!res.ok) {
+    // Keep the status and the parsed body on the error: some flows (project
+    // delete) need the structured fields, not just the message text.
+    const err = new Error(body.error || res.statusText);
+    err.status = res.status;
+    err.body = body;
+    throw err;
+  }
   return body;
 }
 
@@ -1931,9 +1938,9 @@ $('new-project').onclick = () => {
 
 /* ---------------- project delete ---------------- */
 function openProjectDelete(p) {
-  const memories = p.active_count || 0;
+  const active = p.active_count || 0;
   const notes = [
-    `永久删除项目「${p.name}」：${memories} 条记忆，连同其设备级/工具级记忆与全部授权关系一并清除，不可恢复（审计日志会留下本次操作记录）。`,
+    `永久删除项目「${p.name}」：连同它的全部记忆（当前 ${active} 条活跃，已归档 / 已被取代的历史记录也一并删除）、设备级 / 工具级记忆与全部授权关系，不可恢复（审计日志会留下本次操作记录）。`,
   ];
   if (p.root_path && !p.marker_exists) {
     notes.push(
@@ -1941,7 +1948,17 @@ function openProjectDelete(p) {
     );
   }
   const fields = [{ id: '_note', type: 'note', text: notes.join(' ') }];
-  if (memories > 0) fields.push({ id: 'confirm', type: 'text', label: `输入项目名确认：${p.name}` });
+  // Always render the confirmation field. The tree count is active-only while
+  // the hub counts every status, so a project whose memories are all archived
+  // shows 0 here yet still requires the name echo — gating the field on the
+  // local count produced a dialog that could only ever fail (400) with nowhere
+  // to type. Blank is fine for a truly empty project; the hub ignores it then.
+  fields.push({
+    id: 'confirm',
+    type: 'text',
+    label: `输入项目名确认：${p.name}`,
+    hint: `${p.name}（项目为空可留空）`,
+  });
   if (p.marker_exists) {
     fields.push({
       id: 'remove_marker', type: 'checkbox', value: false,
@@ -1950,10 +1967,24 @@ function openProjectDelete(p) {
   }
   formModal('删除项目 · ' + p.name, fields, '永久删除', async (v, close) => {
     const query = new URLSearchParams();
-    if (v.confirm) query.set('confirm', v.confirm);
+    if ((v.confirm || '').trim()) query.set('confirm', v.confirm.trim());
     if (v.remove_marker) query.set('remove_marker', '1');
     const qs = query.toString();
-    const res = await api('/api/projects/' + encodeURIComponent(p.id) + (qs ? '?' + qs : ''), { method: 'DELETE' });
+    let res;
+    try {
+      res = await api('/api/projects/' + encodeURIComponent(p.id) + (qs ? '?' + qs : ''), { method: 'DELETE' });
+    } catch (e) {
+      if (e.status === 400 && e.body && e.body.confirm_required) {
+        // The hub counts archived rows too: report its number, clear the field
+        // and keep the dialog open so the retry happens in place.
+        const input = $('gm-confirm');
+        if (input) { input.value = ''; input.focus(); }
+        throw new Error(
+          `该项目共有 ${e.body.memories} 条记忆（含已归档 / 已被取代），请输入项目名「${e.body.confirm_required}」确认`,
+        );
+      }
+      throw e;
+    }
     close();
     delete state.expanded[p.id];
     await loadTree();

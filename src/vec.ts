@@ -159,12 +159,46 @@ const MISMATCH_WARNING =
 const NO_INDEX_WARNING =
   '已配置嵌入模型但尚无向量索引，本次为词法检索；运行 hivemem repair-embeddings 为存量记忆构建索引。';
 
+/** Env number with a sane fallback: unset / NaN / negative → default. */
+const numberEnv = (name: string, fallback: number): number => {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw >= 0 ? raw : fallback;
+};
+
+/**
+ * Semantic admission gate (used by hybridSearch). bge-family Chinese models
+ * place *unrelated* pairs at cosine ~0.30-0.45 (embedding anisotropy), so the
+ * old `if (score > 0)` check admitted the entire corpus: every query returned
+ * `total = corpus size`, and metadata (pin/recency/importance, budget 0.30)
+ * outranked relevance. Two limits combine:
+ *
+ *   - an absolute floor, calibrated per model family (env-overridable);
+ *   - a cut relative to the query's own best hit, for corpora that sit
+ *     uniformly high or low for a given query.
+ *
+ * Pure lexical hits bypass the gate: matching text is evidence on its own.
+ */
+const SEMANTIC_MIN_SCORE = (): number => numberEnv('HIVEMEM_SEMANTIC_MIN_SCORE', 0.4);
+const SEMANTIC_MARGIN = (): number => numberEnv('HIVEMEM_SEMANTIC_MARGIN', 0.12);
+
+/**
+ * Reciprocal-rank fusion (Cormack et al. 2009). Rank-based fusion is the
+ * portable choice here: raw cosine scales differ per model (bge ~0.3-0.7,
+ * OpenAI ~0.0-0.3), while rank order stays comparable. k=10 (not the classic
+ * 60) because candidate sets are ≤100; `score` is scaled so "first in both
+ * paths" → 1.0 and "first in one path" → 0.5.
+ */
+const RRF_K = 10;
+const RRF_SCALE = 5;
+
 /**
  * Lexical search plus optional semantic layer. When an embedder is configured,
  * the query is embedded and compared (cosine) against all vectors of the
- * filtered scope; candidates from both paths are blended:
+ * filtered scope. Candidates are admitted by the semantic gate and then fused
+ * by reciprocal rank (see RRF_K); metadata (recency/importance/pin/kind) only
+ * breaks ties, it never outranks relevance:
  *
- *   final = 0.35·semantic + 0.35·lexicalText + 0.30·(rest / 0.55)
+ *   score = 5·(1/(10+rank_sem) + 1/(10+rank_lex))
  *
  * Lexical-only fallback keeps the classic 0.45·text + rest formula.
  */
@@ -179,7 +213,13 @@ export async function hybridSearch(
   if (options.projectIds && options.projectIds.length === 0) {
     return { hits: [], total: 0, mode: 'browse', warnings };
   }
-  const lexical = store.searchMemories(db, { ...options, limit: Math.max(options.limit ?? 20, 100) });
+  // offset is applied exactly once, after fusion: passing it down here shifted
+  // the lexical pool and then the fused slice shifted it again (page 2 lost rows).
+  const lexical = store.searchMemories(db, {
+    ...options,
+    offset: 0,
+    limit: Math.max(options.limit ?? 20, 100),
+  });
   const query = options.query?.trim();
   if (!embedder || !query) {
     return { ...lexical, warnings };
@@ -266,7 +306,17 @@ export async function hybridSearch(
     if (score > 0) semantic.set(row.id, score);
   }
 
-  // Union candidates: lexical hits + semantic hits.
+  // Admission: drop vectors that carry no relevance evidence. Without this,
+  // every active memory is a "hit" for every query and the ranking degenerates
+  // into a metadata sort (see SEMANTIC_MIN_SCORE).
+  const scanned = rows.length;
+  const semTop = semantic.size ? Math.max(...semantic.values()) : 0;
+  const semFloor = Math.max(SEMANTIC_MIN_SCORE(), semTop - SEMANTIC_MARGIN());
+  for (const [id, score] of [...semantic]) {
+    if (score < semFloor) semantic.delete(id);
+  }
+
+  // Union candidates: lexical hits + gated semantic hits.
   const byId = new Map<string, { m: Memory; text: number }>();
   for (const hit of lexical.hits) byId.set(hit.id, { m: hit, text: hit.textScore });
   const missing = [...semantic.keys()].filter((id) => !byId.has(id));
@@ -283,33 +333,51 @@ export async function hybridSearch(
     }
   }
 
+  // Reciprocal-rank fusion over both paths; metadata only breaks ties.
+  const semRank = new Map<string, number>();
+  [...semantic.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .forEach(([id], i) => semRank.set(id, i));
+  const lexRank = new Map<string, number>();
+  [...lexical.hits]
+    .sort((a, b) => b.textScore - a.textScore)
+    .forEach((hit, i) => lexRank.set(hit.id, i));
+  const rrfShare = (rank: number | undefined): number => (rank === undefined ? 0 : 1 / (RRF_K + rank));
+  const fused = (id: string): number =>
+    Math.min(1, RRF_SCALE * (rrfShare(semRank.get(id)) + rrfShare(lexRank.get(id))));
+
   const limit = Math.max(1, Math.min(options.limit ?? 20, 100));
   const offset = Math.max(0, options.offset ?? 0);
   const overdue = (m: store.Memory): boolean =>
     m.review_after !== null && Number.isFinite(Date.parse(m.review_after)) && Date.parse(m.review_after) <= Date.now();
-  const scored: Array<SearchHit> = [];
-  for (const [id, sem] of semantic) {
-    const entry = byId.get(id);
-    if (!entry) continue;
-    const final = 0.35 * sem + 0.35 * entry.text + (0.3 / 0.55) * restScore(entry.m);
+  const scored: Array<{ hit: SearchHit; raw: number }> = [];
+  for (const [id, entry] of byId) {
+    const sem = semantic.get(id) ?? null;
+    const fromSemantic = semRank.has(id);
+    const fromLexical = lexRank.has(id);
+    const raw = fused(id);
     scored.push({
-      ...entry.m,
-      score: Math.round(final * 1000) / 1000,
-      textScore: Math.round(entry.text * 1000) / 1000,
-      semanticScore: Math.round(sem * 1000) / 1000,
-      needsReview: overdue(entry.m),
-      snippet: clip(entry.m.content.replace(/\s+/g, ' '), 160),
+      raw,
+      hit: {
+        ...entry.m,
+        score: Math.round(raw * 1000) / 1000,
+        textScore: Math.round(entry.text * 1000) / 1000,
+        semanticScore: sem === null ? null : Math.round(sem * 1000) / 1000,
+        relevance: sem === null ? null : Math.round(sem * 1000) / 1000,
+        matched: fromSemantic && fromLexical ? 'both' : fromSemantic ? 'semantic' : 'lexical',
+        needsReview: overdue(entry.m),
+        snippet: clip(entry.m.content.replace(/\s+/g, ' '), 160),
+      },
     });
   }
-  for (const hit of lexical.hits) {
-    if (semantic.has(hit.id)) continue;
-    scored.push({ ...hit, semanticScore: null });
-  }
-  scored.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+  scored.sort(
+    (a, b) => b.raw - a.raw || restScore(b.hit) - restScore(a.hit) || a.hit.id.localeCompare(b.hit.id),
+  );
 
   return {
-    hits: scored.slice(offset, offset + limit),
+    hits: scored.slice(offset, offset + limit).map(({ hit }) => hit),
     total: scored.length,
+    scanned,
     mode: 'hybrid',
     warnings,
   };

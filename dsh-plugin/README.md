@@ -38,7 +38,7 @@ dsh plugin --profile web add https://github.com/zp96324511/HiveMem-MCP/releases/
 
 重启 dsh Web Host 后生效。
 
-**升级**：用**带版本号**的 URL 重新 add，例如 `.../releases/download/v0.4.4/hivemem-dsh.tgz`。`latest/download` 的 spec 不变，pnpm 会跳过解析、装不到新版本。
+**升级**：用**带版本号**的 URL 重新 add，例如 `.../releases/download/v0.5.0/hivemem-dsh.tgz`。`latest/download` 的 spec 不变，pnpm 会跳过解析、装不到新版本。
 
 ### 本地开发（file: 安装）
 

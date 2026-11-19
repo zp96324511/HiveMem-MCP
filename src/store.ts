@@ -71,12 +71,27 @@ export interface Memory {
   evidence: Evidence[];
 }
 
+/** Which retrieval path(s) produced a hit. */
+export type MatchSource = 'semantic' | 'lexical' | 'both' | 'none';
+
 export interface SearchHit extends Memory {
+  /**
+   * Fusion rank score (0..1) **within this query** — it orders the result set
+   * but is not comparable across queries and carries no metadata weighting.
+   */
   score: number;
-  /** Pure lexical-text component (0..1) exposed for hybrid blending. */
+  /** Pure lexical-text component (0..1, rank-derived) exposed for hybrid blending. */
   textScore: number;
   /** Cosine similarity when semantic search contributed, else null. */
   semanticScore: number | null;
+  /**
+   * Absolute relevance evidence: the raw cosine for semantic hits, null for
+   * lexical-only hits (rank-based text score is not an absolute measure).
+   * Unlike `score`, this is comparable across queries.
+   */
+  relevance: number | null;
+  /** Retrieval path(s) that produced this hit; 'none' only in browse mode. */
+  matched: MatchSource;
   /** True when review_after has passed (advisory, never hides content). */
   needsReview: boolean;
   snippet: string;
@@ -199,11 +214,18 @@ const toMemory = (r: Row, userIds?: Set<string>): Memory => ({
 const isOverdue = (m: Memory): boolean =>
   m.review_after !== null && Number.isFinite(Date.parse(m.review_after)) && Date.parse(m.review_after) <= Date.now();
 
-const withHitFields = (m: Memory, score: number, textScore: number): SearchHit => ({
+const withHitFields = (
+  m: Memory,
+  score: number,
+  textScore: number,
+  matched: MatchSource = 'lexical',
+): SearchHit => ({
   ...m,
   score: Math.round(score * 1000) / 1000,
   textScore: Math.round(textScore * 1000) / 1000,
   semanticScore: null,
+  relevance: null,
+  matched,
   needsReview: isOverdue(m),
   snippet: clip(m.content.replace(/\s+/g, ' '), 160),
 });
@@ -822,8 +844,11 @@ export interface SearchOptions {
 
 export interface SearchResult {
   hits: SearchHit[];
+  /** Hits that survived relevance admission (NOT raw corpus size). */
   total: number;
   mode: 'browse' | 'fts' | 'substring' | 'hybrid';
+  /** Candidate vectors compared before admission (hybrid mode only). */
+  scanned?: number;
   /** Explicit degradation notices (never silently degrade). */
   warnings?: string[];
 }
@@ -894,7 +919,7 @@ export function searchMemories(db: Db, options: SearchOptions): SearchResult {
     return {
       hits: rows.map((r) => {
         const m = toMemory(r, userIds);
-        return withHitFields(m, blendScore(m, null), 0);
+        return withHitFields(m, blendScore(m, null), 0, 'none');
       }),
       total: rows.length,
       mode: 'browse',
@@ -922,7 +947,7 @@ export function searchMemories(db: Db, options: SearchOptions): SearchResult {
       })
       .sort((a, b) => b.s - a.s);
     return {
-      hits: scored.slice(offset, offset + limit).map(({ m, s, text }) => withHitFields(m, s, text)),
+      hits: scored.slice(offset, offset + limit).map(({ m, s, text }) => withHitFields(m, s, text, 'lexical')),
       total: scored.length,
       mode: 'fts',
     };
@@ -949,7 +974,7 @@ export function searchMemories(db: Db, options: SearchOptions): SearchResult {
     })
     .sort((a, b) => b.s - a.s);
   return {
-    hits: scored.slice(offset, offset + limit).map(({ m, s, text }) => withHitFields(m, s, text)),
+    hits: scored.slice(offset, offset + limit).map(({ m, s, text }) => withHitFields(m, s, text, 'lexical')),
     total: scored.length,
     mode: 'substring',
   };
